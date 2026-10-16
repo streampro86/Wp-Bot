@@ -39,3 +39,10 @@ This starter deliberately processes group chats only and only reacts when the co
 
 ## Important
 Baileys is an unofficial WhatsApp Web integration, not the official WhatsApp Cloud API. WhatsApp changes can interrupt the connection and unofficial automation can carry account restrictions risk. Use only with an account you control and respect group members' privacy.
+
+
+## Pairing troubleshooting (updated)
+- The app now attempts to fetch the current WhatsApp Web protocol version and uses a desktop Chrome browser identity.
+- If the WhatsApp app still says “Couldn't link device”, this can be a Baileys/WhatsApp pairing-code compatibility issue, not necessarily a wrong phone number. Use the dashboard's QR login as the fallback: refresh the QR and scan it from WhatsApp → Linked Devices → Link a Device.
+- The app treats Baileys `restartRequired` (status 515) as a reconnect request and opens a fresh socket.
+- Do not repeatedly request codes in quick succession. Wait briefly between attempts.

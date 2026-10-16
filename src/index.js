@@ -3,6 +3,7 @@ import pino from "pino";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 import fs from "node:fs";
@@ -102,12 +103,22 @@ async function startWhatsApp() {
     fs.mkdirSync(config.sessionDirectory, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(config.sessionDirectory);
     authStateRef = state;
+    let version;
+    try {
+      const latest = await fetchLatestBaileysVersion();
+      version = latest.version;
+      addLog("info", `Using WhatsApp Web protocol version ${version.join(".")}`);
+    } catch (error) {
+      addLog("warn", `Could not fetch latest WhatsApp Web version; using library default: ${error.message}`);
+    }
     sock = makeWASocket({
+      ...(version ? { version } : {}),
       auth: state,
       logger,
-      browser: Browsers.ubuntu(config.botName),
+      // A conventional desktop browser identity is more compatible with pairing-code login.
+      browser: Browsers.macOS("Chrome"),
       printQRInTerminal: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       syncFullHistory: false
     });
 
@@ -133,14 +144,18 @@ async function startWhatsApp() {
       if (connection === "close") {
         const code = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
+        const restartRequired = code === DisconnectReason.restartRequired;
+        const errorMessage = lastDisconnect?.error?.message || "No error message";
         setBotState({ connection: loggedOut ? "logged_out" : "disconnected", connected: false });
-        addLog("warn", `WhatsApp connection closed (code: ${code ?? "unknown"})`);
+        addLog("warn", `WhatsApp connection closed (code: ${code ?? "unknown"}; ${errorMessage})`);
         if (!loggedOut) {
           clearTimeout(reconnectTimer);
+          // Baileys/WhatsApp may close with 515 after pairing to request a fresh socket.
+          const delay = restartRequired ? 250 : 2500;
           reconnectTimer = setTimeout(() => {
             reconnecting = false;
             startWhatsApp().catch((e) => addLog("error", `Reconnect failed: ${e.message}`));
-          }, 3000);
+          }, delay);
         }
       }
     });
@@ -175,8 +190,12 @@ export async function requestPairingCode(phoneNumber) {
   setBotState({ connection: "waiting_for_pairing", connected: false });
   addLog("info", "Pairing-code request started");
   try {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Baileys docs recommend requesting the code only after the socket begins connecting.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     if (!sock || getBotState().connected) throw new Error("WhatsApp socket state changed. Refresh dashboard and retry.");
+    if (authStateRef?.creds?.registered) {
+      throw new Error("Session became registered while waiting. Refresh the dashboard.");
+    }
     const code = await sock.requestPairingCode(clean);
     pairingCode = code;
     qrData = null;
