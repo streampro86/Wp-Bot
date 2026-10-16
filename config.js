@@ -8,7 +8,7 @@ export default {
   // Change these before deploying. Dashboard routes are protected by this login.
   dashboard: {
     username: "admin",
-    password: "CHANGE-THIS-STRONG-PASSWORD"
+    password: "admin"
   },
 
   // Optional: put your WhatsApp number here for pairing-code login.
