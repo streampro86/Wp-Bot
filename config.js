@@ -25,7 +25,7 @@ export default {
   authStorage: "mongodb", // "mongodb" persists login; "local" is not persistent on Render Free
   // Example format: mongodb+srv://DB_USER:DB_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
   // Replace this placeholder with your own private Atlas URI before deploying.
-  mongoUri: "mongodb+srv://devxhasu_db_user:xB9tRKDfuKQyEzC2@cluster0.32iypog.mongodb.net/hasu_bot?retryWrites=true&w=majority",
+  mongoUri: "PASTE_MONGODB_ATLAS_URI_HERE",
   mongoDbName: "mahadi_whatsapp_bot",
   mongoAuthCollection: "baileys_auth",
   // Used only when authStorage is "local" or MongoDB is intentionally disabled.

@@ -49,7 +49,6 @@ async function useMongoAuthState() {
   }
   const db = mongoClient.db(config.mongoDbName || "mahadi_whatsapp_bot");
   mongoAuthCollection = db.collection(config.mongoAuthCollection || "baileys_auth");
-  await mongoAuthCollection.createIndex({ _id: 1 }, { unique: true });
 
   const credsDoc = await mongoAuthCollection.findOne({ _id: "creds" });
   const creds = credsDoc?.data
