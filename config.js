@@ -13,7 +13,7 @@ export default {
 
   // Optional: put your WhatsApp number here for pairing-code login.
   // International digits only, e.g. Bangladesh: 8801XXXXXXXXX (no +, spaces or dashes).
-  pairingNumber: "",
+  pairingNumber: "8801994065083",
 
   // Persistent session directory. On Render, attach a persistent disk at /var/data
   // and change this to "/var/data/session".
