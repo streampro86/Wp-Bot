@@ -1,9 +1,13 @@
 import express from "express";
 import pino from "pino";
+import { MongoClient } from "mongodb";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  initAuthCreds,
+  BufferJSON,
+  proto,
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 import fs from "node:fs";
@@ -24,7 +28,83 @@ let pairingCode = null;
 let loginMode = "qr";
 let pairingRequestInProgress = false;
 let authStateRef = null;
+let mongoClient = null;
+let mongoAuthCollection = null;
 const pluginModules = new Map();
+
+
+// MongoDB-backed Baileys auth storage works on Render Free without a persistent disk.
+// Create a free MongoDB Atlas database and put its URI in config.js.
+async function useMongoAuthState() {
+  if (!config.mongoUri || !String(config.mongoUri).startsWith("mongodb")) {
+    throw new Error("MongoDB auth storage is enabled but config.mongoUri is missing. Add your MongoDB Atlas URI in config.js.");
+  }
+  if (!mongoClient) {
+    mongoClient = new MongoClient(config.mongoUri, {
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+      maxPoolSize: 5
+    });
+    await mongoClient.connect();
+  }
+  const db = mongoClient.db(config.mongoDbName || "mahadi_whatsapp_bot");
+  mongoAuthCollection = db.collection(config.mongoAuthCollection || "baileys_auth");
+  await mongoAuthCollection.createIndex({ _id: 1 }, { unique: true });
+
+  const credsDoc = await mongoAuthCollection.findOne({ _id: "creds" });
+  const creds = credsDoc?.data
+    ? JSON.parse(credsDoc.data, BufferJSON.reviver)
+    : initAuthCreds();
+
+  const keys = {
+    async get(type, ids) {
+      if (!ids.length) return {};
+      const docs = await mongoAuthCollection.find({
+        _id: { $in: ids.map((id) => `${type}-${id}`) }
+      }).toArray();
+      const result = {};
+      for (const doc of docs) {
+        const id = doc._id.slice(type.length + 1);
+        let value = JSON.parse(doc.data, BufferJSON.reviver);
+        if (type === "app-state-sync-key") {
+          value = proto.Message.AppStateSyncKeyData.fromObject(value);
+        }
+        result[id] = value;
+      }
+      return result;
+    },
+    async set(data) {
+      const operations = [];
+      for (const [type, entries] of Object.entries(data)) {
+        for (const [id, value] of Object.entries(entries || {})) {
+          const _id = `${type}-${id}`;
+          if (value == null) operations.push({ deleteOne: { filter: { _id } } });
+          else operations.push({
+            updateOne: {
+              filter: { _id },
+              update: { $set: { data: JSON.stringify(value, BufferJSON.replacer), updatedAt: new Date() } },
+              upsert: true
+            }
+          });
+        }
+      }
+      if (operations.length) await mongoAuthCollection.bulkWrite(operations, { ordered: false });
+    }
+  };
+
+  const state = {
+    creds,
+    keys
+  };
+  const saveCreds = async () => {
+    await mongoAuthCollection.updateOne(
+      { _id: "creds" },
+      { $set: { data: JSON.stringify(creds, BufferJSON.replacer), updatedAt: new Date() } },
+      { upsert: true }
+    );
+  };
+  return { state, saveCreds };
+}
 
 function safeText(message) {
   return String(message ?? "").trim();
@@ -51,22 +131,34 @@ async function loadPlugins() {
 }
 
 async function handleIncomingMessage(message) {
-  if (!message?.message || message.key?.fromMe) return;
+  if (!message?.message) return;
+  // Baileys may emit the linked account's own messages only when emitOwnEvents is enabled.
+  if (message.key?.fromMe && config.selfListen !== true) return;
   const remoteJid = message.key?.remoteJid;
-  if (!remoteJid) return;
+  if (!remoteJid || remoteJid === "status@broadcast") return;
 
-  // This starter is intended for group chats. Private chats are ignored by default.
-  if (!remoteJid.endsWith("@g.us")) return;
+  if (config.groupOnly === true && !remoteJid.endsWith("@g.us")) return;
 
   const content = message.message.conversation
     || message.message.extendedTextMessage?.text
     || message.message.imageMessage?.caption
     || message.message.videoMessage?.caption
+    || message.message.documentMessage?.caption
     || "";
   const body = safeText(content);
-  if (!body.startsWith(config.prefix)) return;
+  if (!body) return;
 
-  const [command, ...args] = body.slice(config.prefix.length).trim().split(/\s+/);
+  // Commands must be the first token in the message; text containing "ping" won't trigger.
+  let commandLine = null;
+  if (config.prefixEnabled !== false && config.prefix && body.startsWith(config.prefix)) {
+    commandLine = body.slice(config.prefix.length).trim();
+  } else if (config.noPrefixEnabled === true) {
+    commandLine = body;
+  } else {
+    return;
+  }
+  if (!commandLine) return;
+  const [command, ...args] = commandLine.split(/\s+/);
   if (!command) return;
   const context = {
     sock,
@@ -100,8 +192,15 @@ async function startWhatsApp() {
   if (reconnecting) return;
   reconnecting = true;
   try {
-    fs.mkdirSync(config.sessionDirectory, { recursive: true });
-    const { state, saveCreds } = await useMultiFileAuthState(config.sessionDirectory);
+    let state, saveCreds;
+    if (config.authStorage === "mongodb") {
+      ({ state, saveCreds } = await useMongoAuthState());
+      addLog("info", "Authentication session storage: MongoDB Atlas (persistent on Render Free)");
+    } else {
+      fs.mkdirSync(config.sessionDirectory, { recursive: true });
+      ({ state, saveCreds } = await useMultiFileAuthState(config.sessionDirectory));
+      addLog("warn", "Authentication session storage: local filesystem; Render Free restarts/redeploys may erase login.");
+    }
     authStateRef = state;
     let version;
     try {
@@ -119,6 +218,8 @@ async function startWhatsApp() {
       browser: Browsers.macOS("Chrome"),
       printQRInTerminal: false,
       markOnlineOnConnect: true,
+      // Ask Baileys to emit events for messages sent by the linked account too.
+      emitOwnEvents: true,
       syncFullHistory: false
     });
 
@@ -240,4 +341,15 @@ process.on("uncaughtException", (error) => {
 });
 process.on("unhandledRejection", (error) => {
   addLog("error", `Unhandled rejection: ${error?.message || error}`);
+});
+
+process.on("SIGTERM", async () => {
+  try { if (sock) sock.end(undefined); } catch {}
+  try { if (mongoClient) await mongoClient.close(); } catch {}
+  process.exit(0);
+});
+process.on("SIGINT", async () => {
+  try { if (sock) sock.end(undefined); } catch {}
+  try { if (mongoClient) await mongoClient.close(); } catch {}
+  process.exit(0);
 });

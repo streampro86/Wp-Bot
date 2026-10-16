@@ -71,7 +71,7 @@ a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap}.small{font-size:12px}
 <section class="card"><h2>Pairing Code Login</h2><form id="pairForm"><label for="phone">Phone number with country code (digits only)</label>
 <input id="phone" placeholder="8801XXXXXXXXX" autocomplete="off" required minlength="8" maxlength="15">
 <button type="submit">Generate Pairing Code</button></form><pre id="pairCode">No pairing code requested</pre><p class="small muted" id="pairMsg"></p></section>
-<section class="card"><h2>Plugin Manager</h2><p class="muted">Current starter includes one ping/status plugin. Toggle takes effect immediately.</p><div id="plugins">Loading…</div></section>
+<section class="card"><h2>Plugin Manager</h2><p class="muted">Separate Ping and Status plugins. Toggle takes effect immediately.</p><div id="plugins">Loading…</div></section>
 <section class="card"><h2>System</h2><div id="system" class="muted">Loading…</div></section>
 <section class="card"><h2>Recent Logs</h2><div id="logs">Loading…</div></section>
 </main>

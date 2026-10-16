@@ -1,28 +1,39 @@
-// Mahadi Hasan WhatsApp Bot — edit settings here. No .env file is required.
+// Mahadi Hasan WhatsApp Bot — all settings live here; no .env required.
 export default {
   botName: "Mahadi Hasan",
   author: "Mahadi Hasan",
   prefix: "!",
+  // Both command styles are enabled by default: !ping and ping.
+  prefixEnabled: true,
+  noPrefixEnabled: true,
+  // Allow commands sent by the linked WhatsApp account itself.
+  selfListen: true,
+  // true = only groups; false = groups and private chats.
+  groupOnly: false,
   port: 10000,
 
-  // Change these before deploying. Dashboard routes are protected by this login.
+  // Dashboard login. Change this password before sharing your repository.
   dashboard: {
     username: "admin",
-    password: "admin"
+    password: "Mahadi@2026#Admin"
   },
 
-  // Optional: put your WhatsApp number here for pairing-code login.
-  // International digits only, e.g. Bangladesh: 8801XXXXXXXXX (no +, spaces or dashes).
+  // Optional: international digits only, e.g. Bangladesh 8801XXXXXXXXX.
   pairingNumber: "",
-
-  // Persistent session directory. On Render, attach a persistent disk at /var/data
-  // and change this to "/var/data/session".
+  // Recommended for Render Free: use a free MongoDB Atlas cluster to persist WhatsApp login.
+  // Paste the Atlas connection URI below; keep this file private because it contains credentials.
+  authStorage: "mongodb", // "mongodb" persists login; "local" is not persistent on Render Free
+  // Example format: mongodb+srv://DB_USER:DB_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+  // Replace this placeholder with your own private Atlas URI before deploying.
+  mongoUri: "PASTE_MONGODB_ATLAS_URI_HERE",
+  mongoDbName: "mahadi_whatsapp_bot",
+  mongoAuthCollection: "baileys_auth",
+  // Used only when authStorage is "local" or MongoDB is intentionally disabled.
   sessionDirectory: "./storage/session",
-
-  // Keep logs in memory for the dashboard; not a permanent audit database.
   maxLogEntries: 150,
 
   plugins: {
-    pingStatus: true
+    ping: true,
+    status: true
   }
 };

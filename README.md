@@ -23,7 +23,7 @@ Starter project using Node.js, Baileys, a protected web dashboard, QR/pairing lo
 - Build command: `npm install`
 - Start command: `npm start`
 - Node version: 20 or newer.
-- For persistent WhatsApp sessions, attach a persistent disk at `/var/data`, then set `sessionDirectory` in `config.js` to `/var/data/session`. Render documents persistent disks as paid-plan functionality; without persistent storage, sessions may be lost on redeploy/restart.
+- This project uses MongoDB Atlas for persistent WhatsApp credentials, so a Render Persistent Disk is not required. In `config.js`, keep `authStorage: "mongodb"` and replace `mongoUri` with your own Atlas connection URI before deploying. The bot cannot persist login until a valid MongoDB URI is configured.
 - Do not deploy multiple instances against the same WhatsApp session.
 
 ## UptimeRobot
@@ -46,3 +46,33 @@ Baileys is an unofficial WhatsApp Web integration, not the official WhatsApp Clo
 - If the WhatsApp app still says “Couldn't link device”, this can be a Baileys/WhatsApp pairing-code compatibility issue, not necessarily a wrong phone number. Use the dashboard's QR login as the fallback: refresh the QR and scan it from WhatsApp → Linked Devices → Link a Device.
 - The app treats Baileys `restartRequired` (status 515) as a reconnect request and opens a fresh socket.
 - Do not repeatedly request codes in quick succession. Wait briefly between attempts.
+
+
+## Commands and configuration
+
+Commands work in groups and private chats by default. In `config.js`, `selfListen: true` enables processing messages sent by the linked account when Baileys emits them. `noPrefixEnabled: true` (default) accepts `ping`, `status`, and `alive`; `prefixEnabled: true` also accepts `!ping`, `!status`, and `!alive`. The command must be the first word in the message. Set either option to `false` to disable that style.
+
+Plugins are split into `plugins/ping.js` and `plugins/status.js`; enable/disable them separately under `config.plugins`. Dashboard login defaults to username `admin` and password `Mahadi@2026#Admin` in this build. Change it in `config.js` before sharing the repository.
+
+A WhatsApp log with disconnect code `515` means Baileys was asked to restart the socket. The bot should reconnect automatically; wait for the dashboard to show `connected` before testing commands.
+
+## Render Free: keep WhatsApp login after restart (MongoDB Atlas)
+
+Render Free web services do not provide a persistent disk. This project can store Baileys credentials and encryption keys in MongoDB Atlas, which has a free tier. The Atlas database is a separate service and its free-tier availability/limits are controlled by MongoDB.
+
+1. Create a free MongoDB Atlas cluster and a database user.
+2. In Atlas, allow network access from Render. For the simplest setup, Atlas may allow `0.0.0.0/0`; use a strong database password because this permits connections from any IP, and never share the URI.
+3. Copy the Node.js connection URI from Atlas, replacing the password placeholder with the database user's password.
+4. In this project's `config.js`, set `mongoUri` to that URI. Keep `authStorage: "mongodb"`.
+5. Push the updated project to GitHub and deploy it on Render. Do not delete the Atlas database or the `baileys_auth` collection after linking.
+6. Pair/login once. Credentials and keys will be stored in MongoDB and can be reused after Render restarts/redeploys.
+
+If `mongoUri` is still `PASTE_MONGODB_ATLAS_URI_HERE`, the bot intentionally logs a clear startup error instead of pretending the session is persistent. If you choose `authStorage: "local"`, login data is on Render's ephemeral filesystem and can be lost after a restart/redeploy.
+
+### Dashboard credentials
+
+The default dashboard credentials are `admin` / `Mahadi@2026#Admin`. Change the password in `config.js` before using the dashboard publicly. Do not commit a real MongoDB URI to a public GitHub repository.
+
+### Commands
+
+With no-prefix enabled, send `ping`, `status`, or `alive`. With prefix enabled, send `!ping`, `!status`, or `!alive`. Self-listen is enabled in config, but Baileys/WhatsApp may not deliver the linked account's own outgoing messages as ordinary incoming events in every situation; test commands from a second account if self-messages are not emitted.
