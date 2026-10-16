@@ -119,7 +119,12 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
     try {
       const artifacts = getLoginArtifacts();
       const dataUrl = artifacts.qr ? await QRCode.toDataURL(artifacts.qr, { width: 300, margin: 2 }) : null;
-      res.json({ dataUrl, pairingCode: artifacts.pairingCode, connected: getBotState().connected });
+      res.json({
+        dataUrl: artifacts.qr ? dataUrl : null,
+        pairingCode: artifacts.pairingCode,
+        connected: getBotState().connected,
+        connection: getBotState().connection
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

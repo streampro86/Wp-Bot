@@ -8,12 +8,12 @@ export default {
   // Change these before deploying. Dashboard routes are protected by this login.
   dashboard: {
     username: "admin",
-    password: "admin"
+    password: "CHANGE-THIS-STRONG-PASSWORD"
   },
 
   // Optional: put your WhatsApp number here for pairing-code login.
   // International digits only, e.g. Bangladesh: 8801XXXXXXXXX (no +, spaces or dashes).
-  pairingNumber: "8801994065083",
+  pairingNumber: "",
 
   // Persistent session directory. On Render, attach a persistent disk at /var/data
   // and change this to "/var/data/session".

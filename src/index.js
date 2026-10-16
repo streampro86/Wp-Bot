@@ -20,6 +20,9 @@ let reconnectTimer;
 let reconnecting = false;
 let qrData = null;
 let pairingCode = null;
+let loginMode = "qr";
+let pairingRequestInProgress = false;
+let authStateRef = null;
 const pluginModules = new Map();
 
 function safeText(message) {
@@ -98,6 +101,7 @@ async function startWhatsApp() {
   try {
     fs.mkdirSync(config.sessionDirectory, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(config.sessionDirectory);
+    authStateRef = state;
     sock = makeWASocket({
       auth: state,
       logger,
@@ -110,9 +114,8 @@ async function startWhatsApp() {
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
-      if (qr) {
+      if (qr && loginMode !== "pairing" && !pairingRequestInProgress) {
         qrData = qr;
-        pairingCode = null;
         setBotState({ connection: "waiting_for_qr", connected: false });
         addLog("info", "New QR code generated");
       }
@@ -122,6 +125,8 @@ async function startWhatsApp() {
       if (connection === "open") {
         qrData = null;
         pairingCode = null;
+        loginMode = "qr";
+        pairingRequestInProgress = false;
         setBotState({ connection: "connected", connected: true, connectedAt: new Date().toISOString() });
         addLog("success", `WhatsApp connected as ${config.botName}`);
       }
@@ -153,15 +158,37 @@ async function startWhatsApp() {
 
 export async function requestPairingCode(phoneNumber) {
   const clean = String(phoneNumber || "").replace(/\D/g, "");
-  if (clean.length < 8 || clean.length > 15) throw new Error("Enter a valid international number with country code, digits only.");
+  if (clean.length < 8 || clean.length > 15) {
+    throw new Error("Enter an international number with country code, digits only (Bangladesh example: 8801XXXXXXXXX).");
+  }
   if (getBotState().connected) throw new Error("WhatsApp is already connected.");
-  if (!sock) throw new Error("WhatsApp client is starting. Wait a few seconds and try again.");
-  const code = await sock.requestPairingCode(clean);
-  pairingCode = code;
+  if (!sock) throw new Error("WhatsApp client is starting. Wait 10 seconds and try again.");
+  if (pairingRequestInProgress) throw new Error("Pairing code request is already running. Wait a few seconds.");
+  if (authStateRef?.creds?.registered) {
+    throw new Error("This session is already linked to a WhatsApp account. Use the existing session, or clear the session folder only if you want to link a different account.");
+  }
+
+  pairingRequestInProgress = true;
+  loginMode = "pairing";
   qrData = null;
+  pairingCode = null;
   setBotState({ connection: "waiting_for_pairing", connected: false });
-  addLog("info", "Pairing code requested from dashboard");
-  return code;
+  addLog("info", "Pairing-code request started");
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    if (!sock || getBotState().connected) throw new Error("WhatsApp socket state changed. Refresh dashboard and retry.");
+    const code = await sock.requestPairingCode(clean);
+    pairingCode = code;
+    qrData = null;
+    addLog("success", "Pairing code generated successfully. Enter it immediately in WhatsApp.");
+    return code;
+  } catch (error) {
+    pairingRequestInProgress = false;
+    loginMode = "qr";
+    setBotState({ connection: "waiting_for_qr", connected: false });
+    addLog("error", `Pairing code generation failed: ${error?.message || error}`);
+    throw new Error(`Could not generate pairing code: ${error?.message || error}`);
+  }
 }
 
 export function getLoginArtifacts() {
