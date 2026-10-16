@@ -1,0 +1,5 @@
+node_modules/
+storage/
+auth_info/
+*.log
+.DS_Store
