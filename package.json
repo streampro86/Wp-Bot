@@ -1,7 +1,7 @@
 {
-  "name": "mahadi-hasan-whatsapp-group-bot",
-  "version": "2.0.0",
-  "description": "Mahadi Hasan WhatsApp bot with persistent AI memory, consent-based learning, web dashboard, session controls and font menu",
+  "name": "mahadi-hasan-whatsapp-bot",
+  "version": "2.1.0",
+  "description": "Mahadi Hasan WhatsApp bot \u2014 advanced AI with sole identity, multi-owner system, web dashboard, MongoDB session, plugins",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

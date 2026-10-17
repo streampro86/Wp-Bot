@@ -200,7 +200,15 @@ async function handleIncomingMessage(message) {
     }
   }
   const senderNumber = senderJid.split("@")[0].split(":")[0].replace(/\D/g, "");
-  const ownerNumber = String(config.ownerJid || "").replace(/\D/g, "");
+  // Multi-owner support
+  const ownerList = new Set();
+  const primary = String(config.ownerJid || "").replace(/\D/g, "");
+  if (primary) ownerList.add(primary);
+  for (const n of (config.owners || [])) {
+    const clean = String(n || "").replace(/\D/g, "");
+    if (clean) ownerList.add(clean);
+  }
+  const isOwner = ownerList.has(senderNumber);
   const context = {
     sock,
     message,
@@ -213,8 +221,8 @@ async function handleIncomingMessage(message) {
     addLog,
     mongoSettingsCollection,
     mongoDb,
-    isOwner: Boolean(ownerNumber && senderNumber === ownerNumber),
-    isAdmin: Boolean((ownerNumber && senderNumber === ownerNumber) || isGroupAdmin)
+    isOwner,
+    isAdmin: Boolean(isOwner || isGroupAdmin)
   };
 
   let commandHandled = false;

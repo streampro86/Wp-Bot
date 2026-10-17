@@ -1,6 +1,15 @@
-# Mahadi Hasan WhatsApp Group Bot
+# Mahadi Hasan WhatsApp Bot
 
-Node.js + Baileys WhatsApp bot with a protected web dashboard, QR/pairing login, MongoDB-backed session storage, persistent plugin toggles, AI commands, and a numbered font selector.
+Node.js + Baileys WhatsApp bot by **Mahadi Hasan**.
+
+Features: protected web dashboard, QR/pairing login, MongoDB-backed session storage, multi-owner system, advanced AI with sole **Mahadi Hasan** identity, persistent plugin toggles, and font selector.
+
+## What's new in v2.1
+- **Sole identity**: AI always replies as Mahadi Hasan (no other names)
+- **Multi-owner system**: support multiple owner numbers via `config.owners` or `OWNER_NUMBERS` env
+- Upgraded AI prompt & conversation memory
+- Improved dashboard labels & branding
+- Cleaner package metadata
 
 ## Included
 - QR login shown in the web dashboard (not only in Render logs)
@@ -11,13 +20,20 @@ Node.js + Baileys WhatsApp bot with a protected web dashboard, QR/pairing login,
 - Linked account name/ID shown on the protected dashboard
 - `!ping`, `!status`, `!alive`, AI, and font commands
 - Public `/health` JSON endpoint for UptimeRobot
-- MongoDB URI and dashboard password supplied through Render environment variables; no `.env` file required
+- MongoDB URI and dashboard password supplied through environment variables
+
+## Owner setup
+In `config.js` or environment:
+- `OWNER_NUMBER` = primary owner (digits only, e.g. 8801XXXXXXXXX)
+- `OWNER_NUMBERS` = extra owners, comma-separated (e.g. 8801AAAA,8801BBBB)
+- Or edit the `owners` array directly in `config.js`
 
 ## Before deploying
-1. Edit `config.js`.
-2. Set the Render environment variable `DASHBOARD_PASSWORD` to a strong unique password. Dashboard username defaults to `admin`.
-3. Set `MONGODB_URI` in Render to your private MongoDB Atlas URI.
-4. Push the project to your own Git repository.
+1. Edit `config.js` if needed.
+2. Set environment variable `DASHBOARD_PASSWORD` to a strong unique password. Dashboard username defaults to `admin`.
+3. Set `MONGODB_URI` to your private MongoDB Atlas URI.
+4. Set `OWNER_NUMBER` (and optionally `OWNER_NUMBERS`).
+5. Push the project to your own Git repository.
 
 ## Render
 - Create a **Web Service** from the repository.

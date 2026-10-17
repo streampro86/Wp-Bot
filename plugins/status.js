@@ -9,9 +9,17 @@ export default {
     const hours = Math.floor(uptime / 3600);
     const minutes = Math.floor((uptime % 3600) / 60);
     const seconds = uptime % 60;
-    const pluginNames = Object.entries(config.plugins || {}).filter(([, enabled]) => enabled !== false).map(([name]) => name);
+    const pluginNames = Object.entries(config.plugins || {})
+      .filter(([, enabled]) => enabled !== false)
+      .map(([name]) => name);
     await sock.sendMessage(remoteJid, {
-      text: `✅ ${config.botName} is online\n\n⏱️ Uptime: ${hours}h ${minutes}m ${seconds}s\n🧩 Enabled plugins: ${pluginNames.join(", ") || "none"}\n👨‍💻 Author: ${config.author}`
+      text: [
+        `✅ *${config.botName}* is online`,
+        "",
+        `⏱️ Uptime: ${hours}h ${minutes}m ${seconds}s`,
+        `🧩 Enabled plugins: ${pluginNames.join(", ") || "none"}`,
+        `👨‍💻 Author: ${config.author}`
+      ].join("\n")
     });
   }
 };

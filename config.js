@@ -1,4 +1,4 @@
-// Mahadi Hasan WhatsApp Bot — secrets are supplied through Render environment variables.
+// Mahadi Hasan WhatsApp Bot — secrets are supplied through environment variables.
 export default {
   botName: "Mahadi Hasan",
   author: "Mahadi Hasan",
@@ -11,7 +11,20 @@ export default {
   // true = only groups; false = groups and private chats.
   groupOnly: false,
   port: Number(process.env.PORT || 10000),
+
+  // ========== OWNER SYSTEM ==========
+  // Primary owner (backward compatible). Use international digits only, e.g. 8801XXXXXXXXX
   ownerJid: String(process.env.OWNER_NUMBER || "").replace(/\D/g, ""),
+  // Multiple owners supported. Add numbers here or via OWNER_NUMBERS env (comma separated).
+  // Example: owners: ["8801XXXXXXXXX", "8801YYYYYYYYY"]
+  owners: [
+    // Primary owner will be auto-added from ownerJid / OWNER_NUMBER at runtime
+  ].concat(
+    String(process.env.OWNER_NUMBERS || "")
+      .split(",")
+      .map((n) => n.replace(/\D/g, ""))
+      .filter(Boolean)
+  ),
 
   // Dashboard login. Change this password before sharing your repository.
   dashboard: {
@@ -22,10 +35,8 @@ export default {
   // Optional: international digits only, e.g. Bangladesh 8801XXXXXXXXX.
   pairingNumber: "",
   // Recommended for Render Free: use a free MongoDB Atlas cluster to persist WhatsApp login.
-  // Paste the Atlas connection URI below; keep this file private because it contains credentials.
   authStorage: "mongodb", // "mongodb" persists login; "local" is not persistent on Render Free
-  // Example format: mongodb+srv://DB_USER:DB_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-  // Set MONGODB_URI in Render Environment; do not commit credentials.
+  // Set MONGODB_URI in environment; do not commit credentials.
   mongoUri: process.env.MONGODB_URI || "",
   mongoDbName: "mahadi_whatsapp_bot",
   mongoAuthCollection: "baileys_auth",
@@ -40,5 +51,11 @@ export default {
     font: true,
     learn: true
   },
-  ai: { endpoint: "https://hasan-indol.vercel.app/api/chat", provider: "auto", timeoutMs: 20000 }
+
+  // AI settings — primary endpoint
+  ai: {
+    endpoint: process.env.AI_ENDPOINT || "https://hasan-indol.vercel.app/api/chat",
+    provider: process.env.AI_PROVIDER || "auto",
+    timeoutMs: 25000
+  }
 };
