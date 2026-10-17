@@ -25,27 +25,25 @@ export async function saveAISettings(collection, values) {
   );
 }
 
-/* ============================================================
- * MAHADI HASAN — real human chat style
- * ============================================================ */
 const MAHADI_SYSTEM = `
-তুমি Mahadi Hasan — একজন আসল বাংলাদেশি মানুষ। AI/bot বলে পরিচয় দিও না, যতক্ষণ সরাসরি না জিজ্ঞেস করে।
+তুমি Mahadi Hasan — একজন ভদ্র, সম্মানী বাংলাদেশি মানুষ।
 
-কথা বলার ধরন (খুব জরুরি):
-- WhatsApp এ বন্ধুর মতো কথা বলো। ছোট, স্বাভাবিক, গরম গরম script নয়।
-- প্রথমে সালাম/শুভেচ্ছা ও খোঁজখবর নিতে পারো (আসসালামু আলাইকুম, কেমন আছেন, কী খবর) — কিন্তু প্রতিবার একই লাইন নয়।
-- User যা বলে তার ওপর ভিত্তি করে উত্তর দাও। আগের কথার repeat কোরো না। একই প্রশ্ন দুইবার জিজ্ঞেস কোরো না।
-- সাধারণত ১–২ লাইন। বেশি বলে বিরক্ত কোরো না।
-- Robot / customer care / “আপনাকে কীভাবে সাহায্য করতে পারি” টাইপ ভাষা ব্যাবহার কোরো না।
-- Emoji কম (০–১টা)। জোর করে emoji নয়।
-- নামের আগে “Mahadi Hasan:” বা “Bot:” লিখবে না — সরাসরি কথা বলো।
-- User Bangla/Banglish/English যে ভাষায় লিখে সেই ভাষায় উত্তর দাও।
-- Serious/sad হলে মজার টোন বন্ধ করে সহানুভূতি দেখাও।
-- নিজেকে AI বলবে না; শুধু সরাসরি জিজ্ঞেস করলে সংক্ষেপে বলো তুমি Mahadi Hasan এর assistant।
+সম্মান ও ভাষা (বাধ্যতামূলক):
+- সবসময় "আপনি / আপনার / আপনাকে" ব্যবহার করো। কখনো "তুমি/তোর/তোকে" বলো না।
+- প্রয়োজনমতো সালাম: আসসালামু আলাইকুম / ওয়ালাইকুম সালাম।
+- খোঁজখবর: কেমন আছেন, কী খবর — একই লাইন বারবার repeat কোরো না।
+- ভদ্র, নম্র, বন্ধুসুলভ। Robot বা customer-care ভাষা নয়।
+
+কথা বলার নিয়ম:
+- WhatsApp এ আসল মানুষের মতো ছোট উত্তর (সাধারণত ১–২ লাইন)।
+- User যা বলে তার ওপর ভিত্তি করে উত্তর দাও। একই প্রশ্ন দুইবার জিজ্ঞেস কোরো না।
+- নামের আগে "Mahadi Hasan:" লিখবে না — সরাসরি কথা বলো।
+- User যে ভাষায় লিখে সেই ভাষায় উত্তর দাও।
+- Emoji কম (০–১টা)।
+- AI/bot বলে পরিচয় দিও না, যতক্ষণ সরাসরি না জিজ্ঞেস করে।
 
 Memory:
-- Recent conversation দিলে সেটা পড়ে context ধরে কথা বলো।
-- যে প্রশ্ন/বিষয় আগে cover হয়েছে সেটা আবার জিজ্ঞেস কোরো না।
+- Recent chat ও saved notes থাকলে context হিসেবে ব্যবহার করো; বানিয়ে বলো না।
 `.trim();
 
 function extractAnswer(data) {
@@ -64,27 +62,22 @@ function extractAnswer(data) {
 
 function cleanReply(text) {
   let t = String(text || "").trim();
-  // Remove bot-like name prefixes
   t = t.replace(/^(Mahadi Hasan|Mahadi|Hasan|Bot|AI|Assistant)\s*[:\-–—]\s*/i, "");
-  t = t.replace(/\b(Hasu Bot|HASU BOT|Hasu|Ritu|Sadiya|Dev X Ritu)\b/gi, "Mahadi Hasan");
-  // Collapse excessive newlines
-  t = t.replace(/\n{3,}/g, "\n\n").trim();
-  return t.slice(0, 5000);
+  t = t.replace(/\b(Hasu Bot|HASU BOT|Hasu|Ritu|Sadiya)\b/gi, "Mahadi Hasan");
+  // Soft enforce apni: if model still uses tui forms in short replies, leave as-is (prompt handles it)
+  return t.replace(/\n{3,}/g, "\n\n").trim().slice(0, 5000);
 }
 
 async function setTyping(sock, remoteJid, on = true) {
   try {
     await sock.sendPresenceUpdate(on ? "composing" : "paused", remoteJid);
-  } catch {
-    /* ignore presence errors */
-  }
+  } catch { /* ignore */ }
 }
 
 async function askAI(prompt, config, addLog) {
   const base = config?.ai?.endpoint || "https://hasan-indol.vercel.app/api/chat";
   const endpoint = new URL(base);
-  const shortPrompt = String(prompt).slice(0, 3500);
-  endpoint.searchParams.set("message", shortPrompt);
+  endpoint.searchParams.set("message", String(prompt).slice(0, 3500));
   endpoint.searchParams.set("provider", config?.ai?.provider || "auto");
 
   const controller = new AbortController();
@@ -95,7 +88,7 @@ async function askAI(prompt, config, addLog) {
   try {
     const response = await fetch(endpoint.toString(), {
       signal: controller.signal,
-      headers: { accept: "application/json", "user-agent": "MahadiHasanBot/2.3" }
+      headers: { accept: "application/json", "user-agent": "MahadiHasanBot/2.4" }
     });
     const rawText = await response.text();
     let data = {};
@@ -106,17 +99,16 @@ async function askAI(prompt, config, addLog) {
       addLog?.("error", `AI API HTTP ${response.status}: ${errDetail}`);
       throw new Error(`AI API HTTP ${response.status}: ${errDetail || "no body"}`);
     }
-
     const answer = extractAnswer(data);
     if (!answer) {
-      addLog?.("error", `AI API ok but no reply field. Keys: ${Object.keys(data).join(",")}`);
+      addLog?.("error", `AI API ok but no reply. Keys: ${Object.keys(data).join(",")}`);
       throw new Error("AI API response did not contain a reply");
     }
     addLog?.("success", `AI reply ok (${answer.length} chars)`);
     return cleanReply(answer);
   } catch (err) {
     if (err?.name === "AbortError") {
-      addLog?.("error", `AI request timed out after ${timeoutMs}ms`);
+      addLog?.("error", `AI timeout after ${timeoutMs}ms`);
       throw new Error(`AI timeout after ${timeoutMs}ms`);
     }
     addLog?.("error", `AI request failed: ${err.message}`);
@@ -136,19 +128,45 @@ async function getConversationContext(mongoDb, chatId, senderId) {
   return rows.reverse();
 }
 
-async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memoryEnabled, addLog }) {
-  let requestPrompt = `${MAHADI_SYSTEM}\n\nUser: ${prompt}\n\nতোমার উত্তর (সরাসরি, নামের প্রিফিক্স ছাড়া):`;
+async function getLearningNotes(mongoDb, chatId, senderId) {
+  if (!mongoDb || !senderId) return [];
+  try {
+    const digits = String(senderId).replace(/\D/g, "");
+    const rows = await mongoDb.collection("learning_entries")
+      .find({
+        chatId,
+        $or: [
+          { senderId },
+          { senderId: digits },
+          { senderId: { $regex: digits.slice(-10) } }
+        ]
+      })
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .toArray();
+    return rows.map((r) => String(r.text || "").trim().slice(0, 300)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
+async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memoryEnabled, addLog }) {
+  let extra = "";
   if (memoryEnabled && mongoDb && chatId && senderId) {
     const history = await getConversationContext(mongoDb, chatId, senderId);
     if (history.length) {
       const transcript = history
         .map((item) => `${item.role === "assistant" ? "Mahadi" : "User"}: ${item.text}`)
         .join("\n");
-      requestPrompt = `${MAHADI_SYSTEM}\n\nআগের কথোপকথন (এখান থেকে context নাও, repeat কোরো না):\n${transcript}\n\nUser এখন বলছে: ${prompt}\n\nতোমার উত্তর (সরাসরি, নামের প্রিফিক্স ছাড়া):`;
+      extra += `\n\nআগের কথোপকথন (repeat কোরো না):\n${transcript}`;
+    }
+    const notes = await getLearningNotes(mongoDb, chatId, senderId);
+    if (notes.length) {
+      extra += `\n\nSaved notes (use if relevant):\n- ${notes.join("\n- ")}`;
     }
   }
 
+  const requestPrompt = `${MAHADI_SYSTEM}${extra}\n\nUser এখন বলছেন: ${prompt}\n\nআপনার উত্তর (সরাসরি, নাম প্রিফিক্স ছাড়া, সবসময় আপনি বলে সম্মানসহ):`;
   const answer = await askAI(requestPrompt, config, addLog);
 
   if (memoryEnabled && mongoDb && chatId && senderId) {
@@ -173,7 +191,10 @@ async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memo
 export async function handleAutoAI(context) {
   const { body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender, commandHandled, addLog, applySavedFont } = context;
   if (commandHandled) return false;
-  if (message?.key?.fromMe) return false;
+  if (message?.key?.fromMe) {
+    addLog?.("debug", "Auto AI skip: message from linked bot number (test from another phone)");
+    return false;
+  }
   if (!body) return false;
   if (/^(?:!|ai\s|font\s|learn\b|ping\b|status\b|alive\b|help\b|menu\b|commands\b|owner\b|myid\b)/i.test(body)) return false;
 
@@ -224,7 +245,7 @@ export default {
   aliases: ["chatgpt", "chat"],
   category: "AI",
   author: "Mahadi Hasan",
-  description: "Mahadi Hasan AI — natural human Bangla/Banglish chat with memory",
+  description: "Mahadi Hasan AI — respectful apni-style natural chat",
   usage: "!ai <message> | !ai on/off/status | !ai group on/off | !ai inbox on/off | !ai memory on/off | !ai forget",
   async execute(ctx) {
     const { sock, remoteJid, args, config, mongoSettingsCollection, mongoDb, message, sender, addLog } = ctx;
@@ -246,8 +267,7 @@ export default {
           `Auto Chat: ${settings.autoChat ? "ON ✅" : "OFF"}`,
           `Group: ${settings.group ? "ON ✅" : "OFF"}`,
           `Inbox: ${settings.inbox ? "ON ✅" : "OFF"}`,
-          `Conversation Memory: ${settings.memory ? "ON ✅" : "OFF"}`,
-          `Endpoint: ${config?.ai?.endpoint || "default"}`
+          `Memory: ${settings.memory ? "ON ✅" : "OFF"}`
         ].join("\n")
       }, { quoted: message });
       return;
@@ -277,12 +297,10 @@ export default {
     }
 
     if (action === "forget") {
-      const ownerSender = senderNumber(sender || remoteJid);
+      const sid = senderNumber(sender || remoteJid);
       if (!mongoDb) throw new Error("MongoDB is not connected");
-      await mongoDb.collection("ai_memory").deleteMany({ chatId: remoteJid, senderId: ownerSender });
-      await sock.sendMessage(remoteJid, {
-        text: "🧹 Ei chat er AI memory clear hoye geche."
-      }, { quoted: message });
+      await mongoDb.collection("ai_memory").deleteMany({ chatId: remoteJid, senderId: sid });
+      await sock.sendMessage(remoteJid, { text: "🧹 Ei chat er AI memory clear hoye geche." }, { quoted: message });
       return;
     }
 
@@ -292,15 +310,11 @@ export default {
         text: [
           "🤖 *Mahadi Hasan AI*",
           "",
-          "!ai <message> — kotha bolo",
-          "!ai on/off — Auto Chat",
+          "!ai <message>",
+          "!ai on/off",
           "!ai status",
-          "!ai group on/off",
-          "!ai inbox on/off",
-          "!ai memory on/off",
-          "!ai forget",
-          "",
-          "Default: Auto Chat OFF"
+          "!ai group/inbox/memory on/off",
+          "!ai forget"
         ].join("\n")
       }, { quoted: message });
       return;
@@ -328,9 +342,7 @@ export default {
     } catch (err) {
       await setTyping(sock, remoteJid, false);
       addLog?.("error", `!ai failed: ${err.message}`);
-      await sock.sendMessage(remoteJid, {
-        text: `⚠️ AI fail: ${err.message}`
-      }, { quoted: message });
+      await sock.sendMessage(remoteJid, { text: `⚠️ AI fail: ${err.message}` }, { quoted: message });
     }
   }
 };

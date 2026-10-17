@@ -10,7 +10,8 @@ async function removeMessage(sock, chatId, key) {
 }
 
 export async function handleLearningMessage({ body, message, remoteJid, sock, mongoSettingsCollection, mongoDb, addLog }) {
-  const senderId = String(message?.key?.participant || message?.key?.remoteJid || "").split(":")[0];
+  const rawSender = String(message?.key?.participant || message?.key?.remoteJid || "");
+  const senderId = rawSender.split("@")[0].split(":")[0].replace(/\D/g, "") || rawSender.split(":")[0];
   const pendingKey = makeKey(remoteJid, senderId);
   const pending = pendingMenus.get(pendingKey);
   if (pending && Date.now() <= pending.expiresAt) {
@@ -28,21 +29,26 @@ export async function handleLearningMessage({ body, message, remoteJid, sock, mo
     }
   }
 
-  if (!mongoDb || !body || message?.key?.fromMe || /^(?:!|learn\b|ai\b|font\b)/i.test(body)) return false;
+  if (!mongoDb || !body || message?.key?.fromMe || /^(?:!|learn\b|ai\b|font\b|ping\b|help\b|status\b)/i.test(body)) return false;
   const settings = await mongoSettingsCollection?.findOne({ _id: "learning" });
-  if (settings?.enabled !== true) return false;
+  if (settings?.enabled !== true) {
+    addLog?.("debug", "Learning skip: global OFF (!learn on)");
+    return false;
+  }
   const consent = await mongoDb.collection("learning_consent").findOne({ chatId: remoteJid, senderId });
-  if (!consent?.enabled) return false;
+  if (!consent?.enabled) {
+    addLog?.("debug", `Learning skip: user not opted in (${senderId})`);
+    return false;
+  }
   await mongoDb.collection("learning_entries").insertOne({
     chatId: remoteJid,
     senderId,
     text: cleanText(body),
     createdAt: new Date()
   });
-  await mongoDb.collection("learning_entries").deleteMany({
-    _id: { $in: (await mongoDb.collection("learning_entries").find({ chatId: remoteJid, senderId }).sort({ createdAt: -1 }).skip(MAX_ENTRIES).project({ _id: 1 }).toArray()).map((x) => x._id) }
-  });
-  addLog?.("debug", `Opt-in learning entry stored for ${senderId}`);
+  const old = await mongoDb.collection("learning_entries").find({ chatId: remoteJid, senderId }).sort({ createdAt: -1 }).skip(MAX_ENTRIES).project({ _id: 1 }).toArray();
+  if (old.length) await mongoDb.collection("learning_entries").deleteMany({ _id: { $in: old.map((x) => x._id) } });
+  addLog?.("info", `Learning saved for ${senderId}: ${cleanText(body).slice(0, 40)}`);
   return false;
 }
 
@@ -60,13 +66,13 @@ export default {
     const { sock, remoteJid, args, message, sender, mongoDb, mongoSettingsCollection } = ctx;
     if (!mongoDb || !mongoSettingsCollection) throw new Error("MongoDB is required for learning storage");
     const action = String(args[0] || "help").toLowerCase();
-    const senderId = String(sender || remoteJid).split(":")[0];
+    const senderId = String(sender || remoteJid).split("@")[0].split(":")[0].replace(/\D/g, "") || String(sender || remoteJid).split(":")[0];
     const collection = mongoDb.collection("learning_entries");
     const consentCollection = mongoDb.collection("learning_consent");
 
     if (["on", "off"].includes(action)) {
       if (!ctx.isOwner) {
-        await sock.sendMessage(remoteJid, { text: "🔒 Global learning ON/OFF শুধু bot owner করতে পারবে." }, { quoted: message });
+        await sock.sendMessage(remoteJid, { text: "🔒 Access nai.\nLearning ON/OFF shudhu *Owner* korte parbe." }, { quoted: message });
         return;
       }
       await mongoSettingsCollection.updateOne({ _id: "learning" }, { $set: { enabled: action === "on", updatedAt: new Date() } }, { upsert: true });

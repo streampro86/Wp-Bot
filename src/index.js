@@ -21,6 +21,22 @@ import { applySavedFont } from "./utils/font.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginsDir = path.resolve(__dirname, "../plugins");
 const logger = pino({ level: "silent" });
+
+// Suppress Baileys/libsignal session dump spam in Render logs
+const _log = console.log.bind(console);
+const _err = console.error.bind(console);
+function isSessionSpam(args) {
+  const s = args.map((a) => {
+    if (typeof a === "string") return a;
+    if (a && typeof a === "object") {
+      try { return JSON.stringify(a); } catch { return String(a); }
+    }
+    return String(a);
+  }).join(" ");
+  return /SessionEntry|Closing session|Closing open session|privKey|rootKey|ephemeralKeyPair|pendingPreKey|lastRemoteEphemeralKey|chainKey|remoteIdentityKey/i.test(s);
+}
+console.log = (...args) => { if (!isSessionSpam(args)) _log(...args); };
+console.error = (...args) => { if (!isSessionSpam(args)) _err(...args); };
 let sock;
 let reconnectTimer;
 let reconnecting = false;

@@ -1,51 +1,64 @@
 import { applySavedFont } from "../src/utils/font.js";
+
 export default {
   name: "Help",
   commands: ["help", "menu", "commands"],
   category: "System",
   author: "Mahadi Hasan",
-  description: "Show all available commands and bot info",
+  description: "Show available commands",
   async execute(ctx) {
-    const { sock, remoteJid, config, message, mongoSettingsCollection } = ctx;
+    const { sock, remoteJid, config, message, mongoSettingsCollection, isOwner } = ctx;
     const prefix = config.prefix || "!";
     const bot = config.botName || "Mahadi Hasan";
 
-    const text = [
+    const lines = [
       `╭─── ✦ *${bot}* ✦ ───╮`,
       `│`,
-      `│  👋 Welcome!`,
+      `│  Assalamu Alaikum`,
       `│  Author: *Mahadi Hasan*`,
-      `│  Prefix: \`${prefix}\`  (no-prefix also works)`,
+      `│  Prefix: \`${prefix}\``,
       `│`,
       `├── 📌 *Basic*`,
       `│  ${prefix}ping`,
-      `│  ${prefix}status  /  ${prefix}alive`,
-      `│  ${prefix}help   /  ${prefix}menu`,
-      `│  ${prefix}owner  /  ${prefix}myid`,
+      `│  ${prefix}status / ${prefix}alive`,
+      `│  ${prefix}help / ${prefix}menu`,
+      `│  ${prefix}myid`,
       `│`,
       `├── 🤖 *AI*`,
       `│  ${prefix}ai <message>`,
-      `│  ${prefix}ai on / off`,
-      `│  ${prefix}ai status`,
-      `│  ${prefix}ai group on/off`,
-      `│  ${prefix}ai inbox on/off`,
-      `│  ${prefix}ai memory on/off`,
-      `│  ${prefix}ai forget`,
+    ];
+
+    if (isOwner) {
+      lines.push(
+        `│  ${prefix}ai on/off/status`,
+        `│  ${prefix}ai group/inbox/memory on/off`,
+        `│  ${prefix}ai forget`,
+        `│  ${prefix}owner`
+      );
+    }
+
+    lines.push(
       `│`,
       `├── 🎨 *Font*`,
       `│  ${prefix}font`,
       `│`,
       `├── 🧠 *Learn*`,
-      `│  ${prefix}learn`,
-      `│`,
-      `├── ℹ️ *Notes*`,
-      `│  • Commands work in group & private`,
-      `│  • Owner settings need owner number`,
-      `│  • Auto AI is OFF by default`,
-      `│`,
-      `╰─── Powered by *Mahadi Hasan* ───╯`
-    ].join("\n");
+      `│  ${prefix}learn status`,
+      `│  ${prefix}learn optin / optout`,
+      `│  ${prefix}learn add <text>`,
+      `│  ${prefix}learn list`,
+    );
 
+    if (isOwner) {
+      lines.push(`│  ${prefix}learn on/off  (owner)`);
+    }
+
+    lines.push(
+      `│`,
+      `╰─── *Mahadi Hasan* ───╯`
+    );
+
+    const text = lines.join("\n");
     const styled = await applySavedFont(text, mongoSettingsCollection);
     await sock.sendMessage(remoteJid, { text: styled }, { quoted: message });
   }
