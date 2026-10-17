@@ -25,19 +25,11 @@ export default {
       `│  ${prefix}myid`,
       `│`,
       `├── 🤖 *AI*`,
+      `│  ${prefix}ai on/off  (group = ei group)`,
+      `│  ${prefix}ai inbox on/off`,
+      `│  ${prefix}ai inbox on 8801XXX`,
+      `│  ${prefix}ai status`,
       `│  ${prefix}ai <message>`,
-    ];
-
-    if (isOwner) {
-      lines.push(
-        `│  ${prefix}ai on/off/status`,
-        `│  ${prefix}ai group/inbox/memory on/off`,
-        `│  ${prefix}ai forget`,
-        `│  ${prefix}owner`
-      );
-    }
-
-    lines.push(
       `│`,
       `├── 🎨 *Font*`,
       `│  ${prefix}font`,

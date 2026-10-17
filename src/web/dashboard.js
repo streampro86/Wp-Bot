@@ -135,7 +135,7 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
       const collection = getMongoSettingsCollection?.();
       if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
       const doc = await collection.findOne({ _id: "ai" });
-      res.json({ settings: { autoChat: false, group: false, inbox: true, memory: true, ...(doc?.values || {}) } });
+      const v = doc?.values || {}; res.json({ settings: { autoChat: v.autoChat === true, group: v.group === true, inbox: v.inbox !== false, memory: v.memory !== false } });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
@@ -148,7 +148,7 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
       const collection = getMongoSettingsCollection?.();
       if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
       const doc = await collection.findOne({ _id: "ai" });
-      const values = { autoChat: false, group: false, inbox: true, memory: true, ...(doc?.values || {}), [key]: enabled };
+      const prev = doc?.values || {}; const values = { autoChat: prev.autoChat === true, group: prev.group === true, inbox: prev.inbox !== false, memory: prev.memory !== false, [key]: enabled === true };
       await collection.updateOne({ _id: "ai" }, { $set: { values, updatedAt: new Date() } }, { upsert: true });
       addLog("success", `Dashboard AI setting changed: ${key}=${enabled}`);
       res.json({ ok: true, settings: values });

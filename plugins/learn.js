@@ -1,17 +1,20 @@
 const pendingMenus = new Map();
-const MAX_ENTRIES = 100;
+const MAX_ENTRIES = 80;
 const MENU_TTL_MS = 60_000;
 
 function makeKey(chatId, senderId) { return `${chatId}:${senderId}`; }
 function cleanText(text) { return String(text || "").trim().slice(0, 1200); }
+function normId(v) {
+  const s = String(v || "");
+  return s.split("@")[0].split(":")[0].replace(/\D/g, "") || s.split(":")[0];
+}
 async function removeMessage(sock, chatId, key) {
   if (!key) return;
-  try { await sock.sendMessage(chatId, { delete: key }); } catch { /* WhatsApp may deny message deletion */ }
+  try { await sock.sendMessage(chatId, { delete: key }); } catch { /* ignore */ }
 }
 
 export async function handleLearningMessage({ body, message, remoteJid, sock, mongoSettingsCollection, mongoDb, addLog }) {
-  const rawSender = String(message?.key?.participant || message?.key?.remoteJid || "");
-  const senderId = rawSender.split("@")[0].split(":")[0].replace(/\D/g, "") || rawSender.split(":")[0];
+  const senderId = normId(message?.key?.participant || message?.key?.remoteJid || "");
   const pendingKey = makeKey(remoteJid, senderId);
   const pending = pendingMenus.get(pendingKey);
   if (pending && Date.now() <= pending.expiresAt) {
@@ -23,32 +26,36 @@ export async function handleLearningMessage({ body, message, remoteJid, sock, mo
         pendingMenus.delete(pendingKey);
         await removeMessage(sock, remoteJid, pending.menuKey);
         await removeMessage(sock, remoteJid, message?.key);
-        await sock.sendMessage(remoteJid, { text: `🧠 *Learned entry ${choice}*\n${row.text}\n\nBy: ${row.senderId}\nSaved: ${new Date(row.createdAt).toLocaleString()}` });
+        await sock.sendMessage(remoteJid, {
+          text: `🧠 *Learned #${choice}*\n${row.text}\n\nBy: ${row.senderId}\n${new Date(row.createdAt).toLocaleString()}`
+        });
         return true;
       }
     }
   }
 
-  if (!mongoDb || !body || message?.key?.fromMe || /^(?:!|learn\b|ai\b|font\b|ping\b|help\b|status\b)/i.test(body)) return false;
+  if (!mongoDb || !body || message?.key?.fromMe) return false;
+  if (/^(?:!|learn\b|ai\b|font\b|ping\b|help\b|status\b|alive\b|menu\b|owner\b)/i.test(body)) return false;
+
   const settings = await mongoSettingsCollection?.findOne({ _id: "learning" });
-  if (settings?.enabled !== true) {
-    addLog?.("debug", "Learning skip: global OFF (!learn on)");
-    return false;
-  }
-  const consent = await mongoDb.collection("learning_consent").findOne({ chatId: remoteJid, senderId });
-  if (!consent?.enabled) {
-    addLog?.("debug", `Learning skip: user not opted in (${senderId})`);
-    return false;
-  }
+  if (settings?.enabled !== true) return false;
+
+  // When learning is ON: save automatically (no separate opt-in required)
   await mongoDb.collection("learning_entries").insertOne({
     chatId: remoteJid,
     senderId,
     text: cleanText(body),
+    scope: "user",
     createdAt: new Date()
   });
-  const old = await mongoDb.collection("learning_entries").find({ chatId: remoteJid, senderId }).sort({ createdAt: -1 }).skip(MAX_ENTRIES).project({ _id: 1 }).toArray();
+  const old = await mongoDb.collection("learning_entries")
+    .find({ chatId: remoteJid, senderId })
+    .sort({ createdAt: -1 })
+    .skip(MAX_ENTRIES)
+    .project({ _id: 1 })
+    .toArray();
   if (old.length) await mongoDb.collection("learning_entries").deleteMany({ _id: { $in: old.map((x) => x._id) } });
-  addLog?.("info", `Learning saved for ${senderId}: ${cleanText(body).slice(0, 40)}`);
+  addLog?.("info", `Learning saved [${senderId}]: ${cleanText(body).slice(0, 50)}`);
   return false;
 }
 
@@ -60,65 +67,120 @@ export default {
   aliases: ["learning"],
   category: "AI",
   author: "Mahadi Hasan",
-  description: "Consent-based learning, saved entries and reply-number detail view",
-  usage: "!learn on/off/status | optin/optout | add <text> | list | forget",
+  description: "Learn from chat and feed notes to AI",
+  usage: "!learn on/off/status | add <text> | list | forget",
   async execute(ctx) {
-    const { sock, remoteJid, args, message, sender, mongoDb, mongoSettingsCollection } = ctx;
-    if (!mongoDb || !mongoSettingsCollection) throw new Error("MongoDB is required for learning storage");
+    const { sock, remoteJid, args, message, sender, mongoDb, mongoSettingsCollection, addLog } = ctx;
+    if (!mongoDb || !mongoSettingsCollection) throw new Error("MongoDB is required for learning");
     const action = String(args[0] || "help").toLowerCase();
-    const senderId = String(sender || remoteJid).split("@")[0].split(":")[0].replace(/\D/g, "") || String(sender || remoteJid).split(":")[0];
+    const senderId = normId(sender || remoteJid);
     const collection = mongoDb.collection("learning_entries");
-    const consentCollection = mongoDb.collection("learning_consent");
 
     if (["on", "off"].includes(action)) {
       if (!ctx.isOwner) {
-        await sock.sendMessage(remoteJid, { text: "🔒 Access nai.\nLearning ON/OFF shudhu *Owner* korte parbe." }, { quoted: message });
+        await sock.sendMessage(remoteJid, {
+          text: "🔒 Access nai.\nLearning ON/OFF shudhu *Owner*."
+        }, { quoted: message });
         return;
       }
-      await mongoSettingsCollection.updateOne({ _id: "learning" }, { $set: { enabled: action === "on", updatedAt: new Date() } }, { upsert: true });
-      await sock.sendMessage(remoteJid, { text: `🧠 Learning ${action.toUpperCase()} হয়েছে। প্রত্যেক user-কে opt-in করতে হবে: !learn optin` }, { quoted: message });
+      await mongoSettingsCollection.updateOne(
+        { _id: "learning" },
+        { $set: { enabled: action === "on", updatedAt: new Date() } },
+        { upsert: true }
+      );
+      addLog?.("info", `Learning global ${action}`);
+      await sock.sendMessage(remoteJid, {
+        text: action === "on"
+          ? "🧠 Learning *ON*\nEkhon normal messages save hobe + AI use korbe.\nImportant fact: `!learn add <text>`"
+          : "🧠 Learning *OFF*"
+      }, { quoted: message });
       return;
     }
+
     if (action === "status") {
       const state = await mongoSettingsCollection.findOne({ _id: "learning" });
-      const consent = await consentCollection.findOne({ chatId: remoteJid, senderId });
-      await sock.sendMessage(remoteJid, { text: `🧠 Learning: ${state?.enabled ? "ON" : "OFF"}\nYour opt-in: ${consent?.enabled ? "ON" : "OFF"}\nEntries: ${await collection.countDocuments({ chatId: remoteJid, senderId })}` }, { quoted: message });
+      const count = await collection.countDocuments({ chatId: remoteJid });
+      const mine = await collection.countDocuments({ chatId: remoteJid, senderId });
+      await sock.sendMessage(remoteJid, {
+        text: [
+          "🧠 *Learning Status*",
+          `Global: ${state?.enabled ? "ON ✅" : "OFF"}`,
+          `This chat entries: ${count}`,
+          `Your entries: ${mine}`
+        ].join("\n")
+      }, { quoted: message });
       return;
     }
-    if (action === "optin" || action === "optout") {
-      await consentCollection.updateOne({ chatId: remoteJid, senderId }, { $set: { enabled: action === "optin", updatedAt: new Date() } }, { upsert: true });
-      if (action === "optout") await collection.deleteMany({ chatId: remoteJid, senderId });
-      await sock.sendMessage(remoteJid, { text: action === "optin" ? "✅ তুমি opt-in করেছ। Learning ON থাকলে তোমার পরের সাধারণ messages সংরক্ষণ হবে। বন্ধ করতে !learn optout দাও।" : "🧹 Opt-out সম্পন্ন; তোমার saved learning entries মুছে দেওয়া হয়েছে।" }, { quoted: message });
-      return;
-    }
+
     if (action === "add") {
       const text = cleanText(args.slice(1).join(" "));
-      if (!text) { await sock.sendMessage(remoteJid, { text: "Usage: !learn add <তথ্য>" }, { quoted: message }); return; }
-      await collection.insertOne({ chatId: remoteJid, senderId, text, createdAt: new Date(), source: "explicit" });
-      await sock.sendMessage(remoteJid, { text: "✅ এই তথ্য learning memory-তে save হয়েছে।" }, { quoted: message });
+      if (!text) {
+        await sock.sendMessage(remoteJid, { text: "Usage: !learn add <tothyo>" }, { quoted: message });
+        return;
+      }
+      await collection.insertOne({
+        chatId: remoteJid,
+        senderId,
+        text,
+        scope: "chat",
+        source: "explicit",
+        createdAt: new Date()
+      });
+      addLog?.("info", `Learning explicit add: ${text.slice(0, 50)}`);
+      await sock.sendMessage(remoteJid, {
+        text: `✅ Save hoyeche. AI ei chat e eta use korbe:\n_${text.slice(0, 200)}_`
+      }, { quoted: message });
       return;
     }
+
     if (action === "forget") {
       await collection.deleteMany({ chatId: remoteJid, senderId });
-      await sock.sendMessage(remoteJid, { text: "🧹 তোমার saved learning entries মুছে দেওয়া হয়েছে।" }, { quoted: message });
+      await sock.sendMessage(remoteJid, { text: "🧹 Tomar learning entries delete." }, { quoted: message });
       return;
     }
+
     if (action === "list") {
-      const entries = await collection.find({ chatId: remoteJid, senderId }).sort({ createdAt: -1 }).limit(10).toArray();
-      if (!entries.length) { await sock.sendMessage(remoteJid, { text: "📭 কোনো saved learning entry নেই। !learn add <text> ব্যবহার করো।" }, { quoted: message }); return; }
-      const menu = ["🧠 *Learning entries*", ...entries.map((entry, index) => `${index + 1}. ${entry.text.slice(0, 90)}`), "", "কোনো নম্বরে Reply দিলে full details দেখাবে (60 sec)."].join("\n");
+      const entries = await collection.find({ chatId: remoteJid }).sort({ createdAt: -1 }).limit(12).toArray();
+      if (!entries.length) {
+        await sock.sendMessage(remoteJid, {
+          text: "📭 Konо entry nai.\n!learn on\n!learn add <text>"
+        }, { quoted: message });
+        return;
+      }
+      const menu = [
+        "🧠 *Learning entries*",
+        ...entries.map((e, i) => `${i + 1}. ${String(e.text).slice(0, 90)}`),
+        "",
+        "Number e reply dile details (60s)."
+      ].join("\n");
       const sent = await sock.sendMessage(remoteJid, { text: menu }, { quoted: message });
-      pendingMenus.set(makeKey(remoteJid, senderId), { menuKey: sent?.key, entries, expiresAt: Date.now() + MENU_TTL_MS });
+      pendingMenus.set(makeKey(remoteJid, senderId), {
+        menuKey: sent?.key,
+        entries,
+        expiresAt: Date.now() + MENU_TTL_MS
+      });
       return;
     }
-    await sock.sendMessage(remoteJid, { text: [
-      "🧠 *Mahadi Hasan — Learning*",
-      "!learn on/off — owner-only global learning control",
-      "!learn optin/optout — your own consent",
-      "!learn status — current status",
-      "!learn add <text> — save a note explicitly",
-      "!learn list — numbered list; reply with a number for details",
-      "!learn forget — delete your saved entries"
-    ].join("\n") }, { quoted: message });
+
+    // optin/optout kept as aliases but optional now
+    if (action === "optin" || action === "optout") {
+      await sock.sendMessage(remoteJid, {
+        text: "ℹ️ Opt-in ar dorkar nai.\nOwner `!learn on` korle auto save hoy.\nFact add: `!learn add <text>`"
+      }, { quoted: message });
+      return;
+    }
+
+    await sock.sendMessage(remoteJid, {
+      text: [
+        "🧠 *Learning*",
+        "!learn on/off — owner",
+        "!learn status",
+        "!learn add <text> — permanent fact for AI",
+        "!learn list",
+        "!learn forget — clear your entries",
+        "",
+        "ON thakle normal chat auto save + AI use kore."
+      ].join("\n")
+    }, { quoted: message });
   }
 };

@@ -1,6 +1,6 @@
 {
   "name": "mahadi-hasan-whatsapp-bot",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "description": "Mahadi Hasan WhatsApp bot \u2014 advanced AI, multi-owner, improved pairing, help plugin, web dashboard",
   "type": "module",
   "main": "src/index.js",
