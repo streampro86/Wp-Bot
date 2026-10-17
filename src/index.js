@@ -429,7 +429,7 @@ export async function requestPairingCode(phoneNumber) {
   if (!sock) throw new Error("WhatsApp client is still starting. Wait 10–15 seconds, refresh dashboard, then try again.");
   if (pairingRequestInProgress) throw new Error("A pairing request is already running. Wait 20 seconds before trying again.");
   if (authStateRef?.creds?.registered) {
-    throw new Error("This session is already linked. Use "Delete saved session" first if you want to link a different number.");
+    throw new Error('This session is already linked. Use Delete saved session first if you want to link a different number.');
   }
 
   pairingRequestInProgress = true;
