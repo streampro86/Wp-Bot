@@ -1,20 +1,22 @@
 # Mahadi Hasan WhatsApp Group Bot
 
-Starter project using Node.js, Baileys, a protected web dashboard, QR/pairing login, plugin loader, and one `ping/status/alive` plugin.
+Node.js + Baileys WhatsApp bot with a protected web dashboard, QR/pairing login, MongoDB-backed session storage, persistent plugin toggles, AI commands, and a numbered font selector.
 
 ## Included
 - QR login shown in the web dashboard (not only in Render logs)
 - Pairing-code login form
 - HTTP Basic Authentication for dashboard and management APIs
-- Plugin manager toggle
-- `!ping`, `!status`, `!alive` in group chats
+- Plugin manager toggles persisted in MongoDB
+- Dashboard buttons for WhatsApp logout and saved-session deletion
+- Linked account name/ID shown on the protected dashboard
+- `!ping`, `!status`, `!alive`, AI, and font commands
 - Public `/health` JSON endpoint for UptimeRobot
 - MongoDB URI and dashboard password supplied through Render environment variables; no `.env` file required
 
 ## Before deploying
 1. Edit `config.js`.
-2. Change `dashboard.username` and set a strong `dashboard.password`. The dashboard refuses login while the default password remains.
-3. Set `port` to `10000` (Render default in this starter).
+2. Set the Render environment variable `DASHBOARD_PASSWORD` to a strong unique password. Dashboard username defaults to `admin`.
+3. Set `MONGODB_URI` in Render to your private MongoDB Atlas URI.
 4. Push the project to your own Git repository.
 
 ## Render
@@ -52,7 +54,7 @@ Baileys is an unofficial WhatsApp Web integration, not the official WhatsApp Clo
 
 Commands work in groups and private chats by default. In `config.js`, `selfListen: true` enables processing messages sent by the linked account when Baileys emits them. `noPrefixEnabled: true` (default) accepts `ping`, `status`, and `alive`; `prefixEnabled: true` also accepts `!ping`, `!status`, and `!alive`. The command must be the first word in the message. Set either option to `false` to disable that style.
 
-Plugins are split into `plugins/ping.js` and `plugins/status.js`; enable/disable them separately under `config.plugins`. Dashboard login defaults to username `admin` and password `Mahadi@2026#Admin` in this build. Change it in `config.js` before sharing the repository.
+Plugins are split into `plugins/ping.js` and `plugins/status.js`; enable/disable them separately under `config.plugins`. Dashboard login defaults to username `admin`; the password must be supplied through the `DASHBOARD_PASSWORD` environment variable. The dashboard refuses authentication while the placeholder password is active.
 
 A WhatsApp log with disconnect code `515` means Baileys was asked to restart the socket. The bot should reconnect automatically; wait for the dashboard to show `connected` before testing commands.
 
@@ -60,18 +62,17 @@ A WhatsApp log with disconnect code `515` means Baileys was asked to restart the
 
 Render Free web services do not provide a persistent disk. This project can store Baileys credentials and encryption keys in MongoDB Atlas, which has a free tier. The Atlas database is a separate service and its free-tier availability/limits are controlled by MongoDB.
 
-1. Create a free MongoDB Atlas cluster and a database user.
-2. In Atlas, allow network access from Render. For the simplest setup, Atlas may allow `0.0.0.0/0`; use a strong database password because this permits connections from any IP, and never share the URI.
-3. Copy the Node.js connection URI from Atlas, replacing the password placeholder with the database user's password.
-4. In this project's `config.js`, set `mongoUri` to that URI. Keep `authStorage: "mongodb"`.
-5. Push the updated project to GitHub and deploy it on Render. Do not delete the Atlas database or the `baileys_auth` collection after linking.
-6. Pair/login once. Credentials and keys will be stored in MongoDB and can be reused after Render restarts/redeploys.
+1. Create a MongoDB Atlas cluster and a database user.
+2. Configure Atlas network access for Render. Use a strong database password and never share the URI.
+3. Add the Atlas connection URI as Render environment variable `MONGODB_URI`; do not commit it to GitHub. Keep `authStorage: "mongodb"`.
+4. Set `DASHBOARD_PASSWORD` in Render and deploy.
+5. Pair/login once. Credentials and keys will be stored in MongoDB and can be reused after Render restarts/redeploys.
 
-If `mongoUri` is still `PASTE_MONGODB_ATLAS_URI_HERE`, the bot intentionally logs a clear startup error instead of pretending the session is persistent. If you choose `authStorage: "local"`, login data is on Render's ephemeral filesystem and can be lost after a restart/redeploy.
+If `MONGODB_URI` is missing or invalid, persistent login cannot start. If you choose `authStorage: "local"`, login data is on Render's ephemeral filesystem and can be lost after a restart/redeploy.
 
 ### Dashboard credentials
 
-The default dashboard credentials are `admin` / `Mahadi@2026#Admin`. Change the password in `config.js` before using the dashboard publicly. Do not commit a real MongoDB URI to a public GitHub repository.
+Dashboard username defaults to `admin`; set `DASHBOARD_PASSWORD` in Render. Never commit a real MongoDB URI or dashboard password to a public GitHub repository.
 
 ### Commands
 
@@ -89,7 +90,10 @@ With no-prefix enabled, send `ping`, `status`, or `alive`. With prefix enabled, 
 - `!ai <message>` — send a prompt to the configured AI API.
 - `!ai on/off/status` — control and inspect Auto Chat. Auto Chat defaults to OFF.
 - `!ai group on/off` and `!ai inbox on/off` — configure Auto Chat destinations.
+- `!font` — shows a numbered menu. Reply `1` Normal, `2` Fancy Script, `3` Bold, or `4` Monospace to save the font style. The menu message is deleted after selection where WhatsApp permits it.
 - `!font fancy Your text`, `!font bold Your text`, `!font mono Your text` — convert text.
-- `!font normal/fancy/bold/mono` — save the preferred font style in MongoDB.
+- `!font normal/fancy/bold/mono` — save the preferred font style directly in MongoDB.
+
+The protected dashboard has separate **Log out WhatsApp** and **Delete saved session** controls. Both clear saved auth data and prepare a fresh login; logout also attempts to unlink the active WhatsApp session. Use these only when you intend to link the account again.
 
 Render environment variables: `MONGODB_URI` (required for persistence) and `DASHBOARD_PASSWORD` (set a strong unique password). The MongoDB URI is read from the environment, never from plugin files.

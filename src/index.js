@@ -156,6 +156,16 @@ async function handleIncomingMessage(message) {
   const body = safeText(content);
   if (!body) return;
 
+  // Interactive plugin handlers run before command parsing (e.g. numbered font menus).
+  try {
+    const fontPlugin = pluginModules.get("font");
+    if (fontPlugin?.handleMessage && await fontPlugin.handleMessage({
+      body, message, remoteJid, sock, mongoSettingsCollection, addLog
+    })) return;
+  } catch (error) {
+    addLog("warn", `Font menu handler failed: ${error.message}`);
+  }
+
   // Commands must be the first token in the message; text containing "ping" won't trigger.
   let commandLine = null;
   if (config.prefixEnabled !== false && config.prefix && body.startsWith(config.prefix)) {
@@ -261,7 +271,7 @@ async function startWhatsApp() {
       }
       if (connection === "close") {
         const code = lastDisconnect?.error?.output?.statusCode;
-        const loggedOut = code === DisconnectReason.loggedOut;
+        const loggedOut = code === DisconnectReason.loggedOut || code === 401;
         const restartRequired = code === DisconnectReason.restartRequired;
         const errorMessage = lastDisconnect?.error?.message || "No error message";
         setBotState({ connection: loggedOut ? "logged_out" : "disconnected", connected: false });
@@ -287,6 +297,60 @@ async function startWhatsApp() {
   } finally {
     reconnecting = false;
   }
+}
+
+async function clearStoredAuthSession() {
+  if (config.authStorage === "mongodb") {
+    if (!mongoAuthCollection) await useMongoAuthState();
+    await mongoAuthCollection.deleteMany({});
+  } else {
+    fs.rmSync(config.sessionDirectory, { recursive: true, force: true });
+  }
+  authStateRef = null;
+  qrData = null;
+  pairingCode = null;
+  loginMode = "qr";
+  pairingRequestInProgress = false;
+}
+
+async function stopCurrentSocket() {
+  clearTimeout(reconnectTimer);
+  reconnecting = true;
+  const current = sock;
+  sock = null;
+  if (current) {
+    try { current.ev.removeAllListeners("connection.update"); } catch {}
+    try { current.ev.removeAllListeners("messages.upsert"); } catch {}
+    try { current.ev.removeAllListeners("creds.update"); } catch {}
+    try { current.end(new Error("Dashboard requested session reset")); } catch {}
+  }
+  setBotState({ connection: "logged_out", connected: false, connectedAt: null });
+}
+
+export async function dashboardLogout() {
+  clearTimeout(reconnectTimer);
+  reconnecting = true;
+  const current = sock;
+  sock = null;
+  if (current) {
+    try { await current.logout(); } catch (error) { addLog("warn", `Remote logout response: ${error.message}`); }
+    try { current.end(new Error("Logged out from dashboard")); } catch {}
+  }
+  await clearStoredAuthSession();
+  setBotState({ connection: "logged_out", connected: false, connectedAt: null });
+  addLog("success", "WhatsApp logged out from dashboard; saved authentication session cleared");
+  reconnecting = false;
+  setTimeout(() => startWhatsApp().catch((error) => addLog("error", `Restart after logout failed: ${error.message}`)), 500);
+  return true;
+}
+
+export async function dashboardDeleteSession() {
+  await stopCurrentSocket();
+  await clearStoredAuthSession();
+  addLog("warn", "Saved WhatsApp session deleted from dashboard; new QR/pairing login required");
+  reconnecting = false;
+  setTimeout(() => startWhatsApp().catch((error) => addLog("error", `Restart after session deletion failed: ${error.message}`)), 500);
+  return true;
 }
 
 export async function requestPairingCode(phoneNumber) {
@@ -344,6 +408,13 @@ createDashboard(app, {
   pluginModules,
   getLogs,
   getBotState,
+  getBotIdentity: () => sock?.user ? {
+    id: sock.user.id || null,
+    name: sock.user.name || null,
+    platform: sock.user.platform || null
+  } : null,
+  dashboardLogout,
+  dashboardDeleteSession,
   addLog,
   savePluginSetting: async (key, enabled) => {
     if (!mongoSettingsCollection) throw new Error("MongoDB is not connected yet");

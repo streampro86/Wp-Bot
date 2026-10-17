@@ -8,7 +8,7 @@ function escapeHtml(value) {
 }
 
 export function createDashboard(app, deps) {
-  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, addLog, savePluginSetting } = deps;
+  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, getBotIdentity, dashboardLogout, dashboardDeleteSession, addLog, savePluginSetting } = deps;
 
   // Public health endpoint for UptimeRobot. It does not expose credentials/session data.
   app.get("/health", (_req, res) => {
@@ -49,23 +49,23 @@ export function createDashboard(app, deps) {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(config.botName)} Dashboard</title>
 <style>
-:root{color-scheme:dark}body{font:15px system-ui;background:#0b1220;color:#edf2ff;margin:0}
-header{padding:22px 5%;background:#121d31;border-bottom:1px solid #26354e}h1{margin:0;font-size:24px}
-main{max-width:1050px;margin:24px auto;padding:0 16px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
-.card{background:#121d31;border:1px solid #26354e;border-radius:14px;padding:18px;min-width:0}
-h2{font-size:18px;margin:0 0 12px}.muted{color:#9eacc6}.pill{display:inline-block;padding:5px 10px;border-radius:20px;background:#233653}
-button,input{font:inherit;border-radius:8px;padding:10px;border:1px solid #3a4c69;background:#0b1220;color:#fff}
-button{cursor:pointer;background:#2365d8;border:0;margin:5px 4px 5px 0}button:disabled{opacity:.5}
-input{width:100%;box-sizing:border-box;margin:6px 0 10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1220;padding:12px;border-radius:8px}
-#qr{width:250px;max-width:100%;background:white;padding:8px;border-radius:8px;display:none}
-.log{font:12px ui-monospace,monospace;padding:7px 0;border-bottom:1px solid #26354e;overflow-wrap:anywhere}
-a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap}.small{font-size:12px}
+ :root{color-scheme:dark}*{box-sizing:border-box}body{font:15px/1.5 system-ui;background:radial-gradient(circle at top,#172847 0,#0b1220 45%);color:#edf2ff;margin:0;min-height:100vh}
+header{padding:24px max(5%,calc((100% - 1120px)/2));background:#101b2fdd;border-bottom:1px solid #26354e;position:sticky;top:0;backdrop-filter:blur(12px);z-index:2}h1{margin:0;font-size:26px;letter-spacing:.2px}
+main{max-width:1120px;margin:26px auto;padding:0 16px 36px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.card{background:linear-gradient(145deg,#14213a,#101a2c);border:1px solid #2a3b58;border-radius:18px;padding:20px;min-width:0;box-shadow:0 10px 35px #0002}
+h2{font-size:18px;margin:0 0 12px}.muted{color:#9eacc6}.pill{display:inline-block;padding:6px 12px;border-radius:20px;background:#233653;font-weight:700}
+button,input{font:inherit;border-radius:10px;padding:11px 13px;border:1px solid #3a4c69;background:#0b1220;color:#fff}
+button{cursor:pointer;background:#2365d8;border:0;margin:5px 4px 5px 0;transition:filter .15s,transform .15s}button:hover{filter:brightness(1.15);transform:translateY(-1px)}button:disabled{opacity:.5;cursor:wait}.danger{background:#a62f42}.secondary{background:#33445f}
+input{width:100%;margin:6px 0 10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1220;padding:12px;border-radius:8px}
+#qr{width:250px;max-width:100%;background:white;padding:8px;border-radius:8px;display:none}.log{font:12px/1.5 ui-monospace,monospace;padding:8px 0;border-bottom:1px solid #26354e;overflow-wrap:anywhere}
+a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.small{font-size:12px}.warning{border-color:#8b3445}.statusline{display:flex;justify-content:space-between;gap:12px;align-items:center}.statusdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#e2a13a;margin-right:7px}
 </style></head><body>
 <header><h1>👑 ${escapeHtml(config.botName)}</h1><div class="muted">WhatsApp Group Bot · Plugin Dashboard · by ${escapeHtml(config.author)}</div></header>
 <main>
 <section class="card"><h2>Connection Status</h2><div id="status" class="pill">Loading…</div><p class="muted" id="details">Fetching status</p>
 <div class="row"><button onclick="refreshAll()">Refresh</button><a href="/health" target="_blank">Health endpoint</a></div>
-<p class="small muted">Pairing codes and QR images are sensitive. Do not share them.</p></section>
+<p class="small muted">Pairing codes and QR images are sensitive. Do not share them.</p><hr style="border-color:#26354e;margin:16px 0"><h2>Linked account</h2><div id="identity" class="muted">Account details are not available until connected.</div></section>
+<section class="card warning"><h2>Session controls</h2><p class="muted">Use these controls when the saved WhatsApp session is invalid or you want to link a different account.</p><div class="row"><button class="danger" onclick="logoutWhatsApp()">Log out WhatsApp</button><button class="secondary" onclick="deleteSession()">Delete saved session</button></div><p class="small muted" id="sessionMsg">Logout attempts to unlink the WhatsApp session. Delete session clears saved credentials and asks for a new QR/pairing login.</p></section>
 <section class="card"><h2>QR Login</h2><p class="muted">Open WhatsApp → Linked Devices → Link a Device, then scan.</p>
 <img id="qr" alt="WhatsApp login QR"><p id="qrMsg" class="muted">Waiting for QR…</p><button onclick="refreshQR()">Refresh QR</button></section>
 <section class="card"><h2>Pairing Code Login</h2><form id="pairForm"><label for="phone">Phone number with country code (digits only)</label>
@@ -85,8 +85,9 @@ async function refreshAll(){
  try{
   const d=await api('/api/status'); document.getElementById('status').textContent=d.state.connection;
   document.getElementById('details').textContent='WhatsApp: '+(d.state.connected?'Connected':'Not connected')+' · Uptime: '+d.state.uptimeSeconds+' sec';
+  document.getElementById('identity').textContent=d.identity ? ('Name: '+(d.identity.name||'Not provided')+' · Number/ID: '+(d.identity.id||'Not available')) : 'Account details are not available until connected.';
   document.getElementById('system').textContent='Node '+d.node+' · Memory '+d.state.memoryMB+' MB · Host '+d.hostname;
-  document.getElementById('plugins').innerHTML=d.plugins.map(p=>'<div class="row" style="align-items:center;justify-content:space-between;margin:8px 0"><span>'+p.name+'</span><button onclick="togglePlugin(\\''+p.key+'\\','+(!p.enabled)+')">'+(p.enabled?'Disable':'Enable')+'</button></div>').join('')||'No plugins loaded';
+  document.getElementById('plugins').innerHTML=d.plugins.map(p=>'<div class="row" style="align-items:center;justify-content:space-between;margin:8px 0"><span>'+p.name+'</span><button onclick="togglePlugin(&quot;'+p.key+'&quot;,'+(!p.enabled)+')">'+(p.enabled?'Disable':'Enable')+'</button></div>').join('')||'No plugins loaded';
   document.getElementById('logs').innerHTML=d.logs.map(l=>'<div class="log">['+l.time+'] ['+l.level.toUpperCase()+'] '+l.message.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</div>').join('')||'No logs';
  }catch(e){document.getElementById('details').textContent=e.message}
 }
@@ -104,6 +105,8 @@ document.getElementById('pairForm').addEventListener('submit',async e=>{
  }catch(err){box.textContent=err.message}
 });
 async function togglePlugin(key,enabled){try{await api('/api/plugins/toggle',{method:'POST',body:JSON.stringify({key,enabled})});refreshAll()}catch(e){alert(e.message)}}
+async function logoutWhatsApp(){if(!confirm('Log out this WhatsApp account and clear the saved session? You will need to link it again.'))return;const box=document.getElementById('sessionMsg');box.textContent='Logging out…';try{await api('/api/session/logout',{method:'POST'});box.textContent='Logged out. New QR/pairing login is being prepared.';setTimeout(refreshQR,1500);refreshAll()}catch(e){box.textContent=e.message}}
+async function deleteSession(){if(!confirm('Delete saved WhatsApp session credentials? This cannot be undone; a new QR/pairing login will be required.'))return;const box=document.getElementById('sessionMsg');box.textContent='Deleting saved session…';try{await api('/api/session/delete',{method:'POST'});box.textContent='Saved session deleted. New QR/pairing login is being prepared.';setTimeout(refreshQR,1500);refreshAll()}catch(e){box.textContent=e.message}}
 refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000);
 </script></body></html>`);
   });
@@ -112,7 +115,7 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
     const plugins = [...pluginModules.entries()].map(([key, plugin]) => ({
       key, name: plugin.name || key, enabled: config.plugins[key] !== false
     }));
-    res.json({ state: getBotState(), plugins, logs: getLogs().slice(0, 50), node: process.version, hostname: os.hostname() });
+    res.json({ state: getBotState(), identity: getBotIdentity?.() || null, plugins, logs: getLogs().slice(0, 50), node: process.version, hostname: os.hostname() });
   });
 
   app.get("/api/qr", async (_req, res) => {
@@ -136,6 +139,26 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
       res.json({ ok: true, code });
     } catch (error) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/session/logout", async (_req, res) => {
+    try {
+      await dashboardLogout();
+      res.json({ ok: true, message: "WhatsApp logged out; session reset." });
+    } catch (error) {
+      addLog("error", `Dashboard logout failed: ${error.message}`);
+      res.status(500).json({ error: `Logout failed: ${error.message}` });
+    }
+  });
+
+  app.post("/api/session/delete", async (_req, res) => {
+    try {
+      await dashboardDeleteSession();
+      res.json({ ok: true, message: "Saved session deleted; new login required." });
+    } catch (error) {
+      addLog("error", `Session deletion failed: ${error.message}`);
+      res.status(500).json({ error: `Could not delete saved session: ${error.message}` });
     }
   });
 
