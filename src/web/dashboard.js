@@ -8,7 +8,7 @@ function escapeHtml(value) {
 }
 
 export function createDashboard(app, deps) {
-  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, addLog } = deps;
+  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, addLog, savePluginSetting } = deps;
 
   // Public health endpoint for UptimeRobot. It does not expose credentials/session data.
   app.get("/health", (_req, res) => {
@@ -71,7 +71,7 @@ a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap}.small{font-size:12px}
 <section class="card"><h2>Pairing Code Login</h2><form id="pairForm"><label for="phone">Phone number with country code (digits only)</label>
 <input id="phone" placeholder="8801XXXXXXXXX" autocomplete="off" required minlength="8" maxlength="15">
 <button type="submit">Generate Pairing Code</button></form><pre id="pairCode">No pairing code requested</pre><p class="small muted" id="pairMsg"></p></section>
-<section class="card"><h2>Plugin Manager</h2><p class="muted">Separate Ping and Status plugins. Toggle takes effect immediately.</p><div id="plugins">Loading…</div></section>
+<section class="card"><h2>Plugin Manager</h2><p class="muted">Plugin state is stored in MongoDB and restored after restart.</p><div id="plugins">Loading…</div></section>
 <section class="card"><h2>System</h2><div id="system" class="muted">Loading…</div></section>
 <section class="card"><h2>Recent Logs</h2><div id="logs">Loading…</div></section>
 </main>
@@ -139,11 +139,17 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
     }
   });
 
-  app.post("/api/plugins/toggle", (req, res) => {
+  app.post("/api/plugins/toggle", async (req, res) => {
     const { key, enabled } = req.body || {};
     if (!pluginModules.has(key)) return res.status(404).json({ error: "Plugin not found" });
-    config.plugins[key] = Boolean(enabled);
-    addLog("info", `Plugin ${key} ${config.plugins[key] ? "enabled" : "disabled"} from dashboard`);
-    res.json({ ok: true, key, enabled: config.plugins[key] });
+    try {
+      await savePluginSetting(key, Boolean(enabled));
+      config.plugins[key] = Boolean(enabled);
+      addLog("success", `Plugin ${key} ${config.plugins[key] ? "enabled" : "disabled"}; saved to MongoDB`);
+      res.json({ ok: true, key, enabled: config.plugins[key], saved: true });
+    } catch (error) {
+      addLog("error", `Could not save plugin setting: ${error.message}`);
+      res.status(503).json({ error: `Setting not saved. Check MongoDB connection: ${error.message}` });
+    }
   });
 }

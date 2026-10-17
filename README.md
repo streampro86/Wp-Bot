@@ -76,3 +76,10 @@ The default dashboard credentials are `admin` / `Mahadi@2026#Admin`. Change the 
 ### Commands
 
 With no-prefix enabled, send `ping`, `status`, or `alive`. With prefix enabled, send `!ping`, `!status`, or `!alive`. Self-listen is enabled in config, but Baileys/WhatsApp may not deliver the linked account's own outgoing messages as ordinary incoming events in every situation; test commands from a second account if self-messages are not emitted.
+
+## Final upgrade notes
+- Bot display name and author are configured as `Mahadi Hasan` in `config.js`.
+- Dashboard plugin ON/OFF changes are written to MongoDB collection `bot_settings` (document `_id: "plugins"`) and restored when MongoDB connects on startup.
+- Set a real MongoDB Atlas URI in `config.js` before deploying. The placeholder URI is not usable.
+- Change the dashboard password in `config.js` before making the dashboard accessible. Do not publish credentials in a public repository.
+- `/health` is intended for uptime monitoring. The dashboard is protected by HTTP Basic Authentication; use HTTPS and a strong password.

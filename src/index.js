@@ -30,6 +30,7 @@ let pairingRequestInProgress = false;
 let authStateRef = null;
 let mongoClient = null;
 let mongoAuthCollection = null;
+let mongoSettingsCollection = null;
 const pluginModules = new Map();
 
 
@@ -49,6 +50,12 @@ async function useMongoAuthState() {
   }
   const db = mongoClient.db(config.mongoDbName || "mahadi_whatsapp_bot");
   mongoAuthCollection = db.collection(config.mongoAuthCollection || "baileys_auth");
+  mongoSettingsCollection = db.collection("bot_settings");
+  const savedPluginSettings = await mongoSettingsCollection.findOne({ _id: "plugins" });
+  if (savedPluginSettings?.values && typeof savedPluginSettings.values === "object") {
+    config.plugins = { ...config.plugins, ...savedPluginSettings.values };
+    addLog("success", "Plugin settings restored from MongoDB");
+  }
 
   const credsDoc = await mongoAuthCollection.findOne({ _id: "creds" });
   const creds = credsDoc?.data
@@ -326,7 +333,15 @@ createDashboard(app, {
   pluginModules,
   getLogs,
   getBotState,
-  addLog
+  addLog,
+  savePluginSetting: async (key, enabled) => {
+    if (!mongoSettingsCollection) throw new Error("MongoDB is not connected yet");
+    await mongoSettingsCollection.updateOne(
+      { _id: "plugins" },
+      { $set: { [`values.${key}`]: Boolean(enabled), updatedAt: new Date() } },
+      { upsert: true }
+    );
+  }
 });
 
 app.listen(config.port, "0.0.0.0", () => {
