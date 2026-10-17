@@ -53,6 +53,8 @@ async function useMongoAuthState() {
   mongoDb = db;
   mongoAuthCollection = db.collection(config.mongoAuthCollection || "baileys_auth");
   mongoSettingsCollection = db.collection("bot_settings");
+  await db.collection("ai_memory").createIndex({ chatId: 1, senderId: 1, createdAt: -1 });
+  await db.collection("learning_entries").createIndex({ chatId: 1, senderId: 1, createdAt: -1 });
   const savedPluginSettings = await mongoSettingsCollection.findOne({ _id: "plugins" });
   if (savedPluginSettings?.values && typeof savedPluginSettings.values === "object") {
     config.plugins = { ...config.plugins, ...savedPluginSettings.values };
@@ -129,7 +131,7 @@ async function loadPlugins() {
         addLog("warn", `Skipped ${file}: default export with execute() is required`);
         continue;
       }
-      pluginModules.set(file.replace(/\.js$/, ""), { ...imported.default, handleAutoAI: imported.handleAutoAI });
+      pluginModules.set(file.replace(/\.js$/, ""), { ...imported.default, handleAutoAI: imported.handleAutoAI, handleMessage: imported.handleMessage || imported.handleLearningMessage });
       addLog("info", `Loaded plugin: ${imported.default.name || file}`);
     } catch (error) {
       addLog("error", `Plugin load failed (${file}): ${error.message}`);
@@ -155,15 +157,18 @@ async function handleIncomingMessage(message) {
     || "";
   const body = safeText(content);
   if (!body) return;
+  const senderJid = String(message.key.participant || message.key.remoteJid || "");
 
-  // Interactive plugin handlers run before command parsing (e.g. numbered font menus).
-  try {
-    const fontPlugin = pluginModules.get("font");
-    if (fontPlugin?.handleMessage && await fontPlugin.handleMessage({
-      body, message, remoteJid, sock, mongoSettingsCollection, addLog
-    })) return;
-  } catch (error) {
-    addLog("warn", `Font menu handler failed: ${error.message}`);
+  // Interactive plugin handlers run before command parsing (e.g. numbered font/learning menus).
+  for (const interactiveName of ["font", "learn"]) {
+    try {
+      const interactivePlugin = pluginModules.get(interactiveName);
+      if (interactivePlugin?.handleMessage && await interactivePlugin.handleMessage({
+        body, message, remoteJid, sock, mongoSettingsCollection, mongoDb, addLog
+      })) return;
+    } catch (error) {
+      addLog("warn", `${interactiveName} menu handler failed: ${error.message}`);
+    }
   }
 
   // Commands must be the first token in the message; text containing "ping" won't trigger.
@@ -173,27 +178,43 @@ async function handleIncomingMessage(message) {
   } else if (config.noPrefixEnabled === true) {
     commandLine = body;
   } else {
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   if (!commandLine) {
-    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, message, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   const [command, ...args] = commandLine.split(/\s+/);
   if (!command) return;
+  let isGroupAdmin = false;
+  if (remoteJid.endsWith("@g.us")) {
+    try {
+      const metadata = await sock.groupMetadata(remoteJid);
+      const senderId = String(message.key.participant || "").split(":")[0];
+      isGroupAdmin = (metadata.participants || []).some((participant) =>
+        String(participant.id || "").split(":")[0] === senderId && ["admin", "superadmin"].includes(participant.admin)
+      );
+    } catch (error) {
+      addLog("debug", `Group admin lookup unavailable: ${error.message}`);
+    }
+  }
+  const senderNumber = senderJid.split("@")[0].split(":")[0].replace(/\D/g, "");
+  const ownerNumber = String(config.ownerJid || "").replace(/\D/g, "");
   const context = {
     sock,
     message,
     remoteJid,
-    sender: message.key.participant || message.key.remoteJid,
+    sender: senderJid,
     body,
     command: command.toLowerCase(),
     args,
     config,
     addLog,
     mongoSettingsCollection,
-    isOwner: Boolean(config.ownerJid && String(message.key.participant || message.key.remoteJid).split("@")[0] === String(config.ownerJid).replace(/\D/g, "")),
-    isAdmin: Boolean(config.ownerJid && String(message.key.participant || message.key.remoteJid).split("@")[0] === String(config.ownerJid).replace(/\D/g, ""))
+    mongoDb,
+    isOwner: Boolean(ownerNumber && senderNumber === ownerNumber),
+    isAdmin: Boolean((ownerNumber && senderNumber === ownerNumber) || isGroupAdmin)
   };
 
   let commandHandled = false;
@@ -212,7 +233,7 @@ async function handleIncomingMessage(message) {
       return;
     }
   }
-  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, message, commandHandled }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
 }
 
 async function startWhatsApp() {
@@ -271,20 +292,25 @@ async function startWhatsApp() {
       }
       if (connection === "close") {
         const code = lastDisconnect?.error?.output?.statusCode;
-        const loggedOut = code === DisconnectReason.loggedOut || code === 401;
+        const requiresFreshLogin = code === DisconnectReason.loggedOut || code === 401;
         const restartRequired = code === DisconnectReason.restartRequired;
         const errorMessage = lastDisconnect?.error?.message || "No error message";
-        setBotState({ connection: loggedOut ? "logged_out" : "disconnected", connected: false });
+        setBotState({ connection: requiresFreshLogin ? "relogin_required" : "disconnected", connected: false });
         addLog("warn", `WhatsApp connection closed (code: ${code ?? "unknown"}; ${errorMessage})`);
-        if (!loggedOut) {
-          clearTimeout(reconnectTimer);
-          // Baileys/WhatsApp may close with 515 after pairing to request a fresh socket.
-          const delay = restartRequired ? 250 : 2500;
-          reconnectTimer = setTimeout(() => {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(async () => {
+          try {
+            if (requiresFreshLogin) {
+              addLog("warn", "WhatsApp rejected the saved session; clearing stale auth and preparing a fresh QR/pairing login");
+              await clearStoredAuthSession();
+            }
             reconnecting = false;
-            startWhatsApp().catch((e) => addLog("error", `Reconnect failed: ${e.message}`));
-          }, delay);
-        }
+            await startWhatsApp();
+          } catch (e) {
+            reconnecting = false;
+            addLog("error", `Reconnect failed: ${e.message}`);
+          }
+        }, requiresFreshLogin ? 1000 : restartRequired ? 250 : 2500);
       }
     });
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
@@ -333,6 +359,10 @@ export async function dashboardLogout() {
   const current = sock;
   sock = null;
   if (current) {
+    // Prevent the socket's close event from scheduling a second reconnect during a dashboard logout.
+    try { current.ev.removeAllListeners("connection.update"); } catch {}
+    try { current.ev.removeAllListeners("messages.upsert"); } catch {}
+    try { current.ev.removeAllListeners("creds.update"); } catch {}
     try { await current.logout(); } catch (error) { addLog("warn", `Remote logout response: ${error.message}`); }
     try { current.end(new Error("Logged out from dashboard")); } catch {}
   }
@@ -408,6 +438,8 @@ createDashboard(app, {
   pluginModules,
   getLogs,
   getBotState,
+  getMongoSettingsCollection: () => mongoSettingsCollection,
+  getMongoDb: () => mongoDb,
   getBotIdentity: () => sock?.user ? {
     id: sock.user.id || null,
     name: sock.user.name || null,

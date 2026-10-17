@@ -11,7 +11,7 @@ export default {
   // true = only groups; false = groups and private chats.
   groupOnly: false,
   port: Number(process.env.PORT || 10000),
-  ownerJid: process.env.OWNER_NUMBER || "",
+  ownerJid: String(process.env.OWNER_NUMBER || "").replace(/\D/g, ""),
 
   // Dashboard login. Change this password before sharing your repository.
   dashboard: {
@@ -25,7 +25,7 @@ export default {
   // Paste the Atlas connection URI below; keep this file private because it contains credentials.
   authStorage: "mongodb", // "mongodb" persists login; "local" is not persistent on Render Free
   // Example format: mongodb+srv://DB_USER:DB_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-  // Replace this placeholder with your own private Atlas URI before deploying.
+  // Set MONGODB_URI in Render Environment; do not commit credentials.
   mongoUri: process.env.MONGODB_URI || "",
   mongoDbName: "mahadi_whatsapp_bot",
   mongoAuthCollection: "baileys_auth",
@@ -37,7 +37,8 @@ export default {
     ping: true,
     status: true,
     ai: true,
-    font: true
+    font: true,
+    learn: true
   },
   ai: { endpoint: "https://hasan-indol.vercel.app/api/chat", provider: "auto", timeoutMs: 20000 }
 };

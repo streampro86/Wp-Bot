@@ -37,7 +37,7 @@ Expected response is HTTP 200 JSON with `ok: true`. UptimeRobot can check reacha
 ## Commands
 Use `!ping`, `!status`, or `!alive` in a group where the connected WhatsApp account is a member.
 
-This starter deliberately processes group chats only and only reacts when the command starts the message. It does not include kick/ban or other moderation plugins yet; those can be added separately.
+The bot supports group and private chats by default. Commands must appear at the start of a message. Moderation commands are not included unless a moderation plugin is added.
 
 ## Important
 Baileys is an unofficial WhatsApp Web integration, not the official WhatsApp Cloud API. WhatsApp changes can interrupt the connection and unofficial automation can carry account restrictions risk. Use only with an account you control and respect group members' privacy.
@@ -97,3 +97,26 @@ With no-prefix enabled, send `ping`, `status`, or `alive`. With prefix enabled, 
 The protected dashboard has separate **Log out WhatsApp** and **Delete saved session** controls. Both clear saved auth data and prepare a fresh login; logout also attempts to unlink the active WhatsApp session. Use these only when you intend to link the account again.
 
 Render environment variables: `MONGODB_URI` (required for persistence) and `DASHBOARD_PASSWORD` (set a strong unique password). The MongoDB URI is read from the environment, never from plugin files.
+
+
+## Owner setup and advanced AI features
+
+Set `OWNER_NUMBER` in Render → Environment to the bot owner's full international phone number using digits only (no `+`, spaces, or dashes). Example format: `8801XXXXXXXXX`. Do not use the linked bot account number unless that is also the person who should own/administer the bot. Redeploy after changing environment variables.
+
+Set `MONGODB_URI` and a strong `DASHBOARD_PASSWORD` in Render Environment. Dashboard username is `admin`. The AI control panel in the protected dashboard can switch Auto Chat, Group, Inbox, and Conversation Memory; changes are stored in MongoDB.
+
+### AI commands
+- `!ai <message>` — ask the AI; recent conversation context is stored per chat and sender.
+- `!ai on/off/status` — owner/group-admin control of Auto Chat.
+- `!ai group on/off`, `!ai inbox on/off`, `!ai memory on/off` — destination and memory controls.
+- `!ai forget` — clear the current sender's saved AI conversation memory for that chat.
+- Auto Chat defaults OFF.
+
+### Consent-based learning commands
+- `!learn on/off/status` — bot owner enables/disables the learning feature.
+- `!learn optin` / `!learn optout` — each user controls whether their ordinary messages may be retained for learning while the feature is enabled. Opting out removes that user's stored learning entries in the current chat.
+- `!learn add <text>` — explicitly save a note.
+- `!learn list` — numbered list; reply to a number to view its details.
+- `!learn forget` — delete your learning entries in the current chat.
+
+Learning is opt-in; it should not be used to covertly collect other participants' messages. The current implementation stores opted-in messages/explicit notes; it is not model training or a claim that the external AI provider permanently learns from them.

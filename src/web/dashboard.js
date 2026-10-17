@@ -8,7 +8,7 @@ function escapeHtml(value) {
 }
 
 export function createDashboard(app, deps) {
-  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, getBotIdentity, dashboardLogout, dashboardDeleteSession, addLog, savePluginSetting } = deps;
+  const { config, getLoginArtifacts, requestPairingCode, pluginModules, getLogs, getBotState, getBotIdentity, dashboardLogout, dashboardDeleteSession, addLog, savePluginSetting, getMongoSettingsCollection, getMongoDb } = deps;
 
   // Public health endpoint for UptimeRobot. It does not expose credentials/session data.
   app.get("/health", (_req, res) => {
@@ -71,6 +71,8 @@ a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sma
 <section class="card"><h2>Pairing Code Login</h2><form id="pairForm"><label for="phone">Phone number with country code (digits only)</label>
 <input id="phone" placeholder="8801XXXXXXXXX" autocomplete="off" required minlength="8" maxlength="15">
 <button type="submit">Generate Pairing Code</button></form><pre id="pairCode">No pairing code requested</pre><p class="small muted" id="pairMsg"></p></section>
+<section class="card"><h2>AI Control Center</h2><p class="muted">Persistent AI settings stored in MongoDB.</p><div id="aiSettings">Loading…</div><div class="row"><button onclick="setAI('autoChat',true)">Auto Chat ON</button><button class="secondary" onclick="setAI('autoChat',false)">Auto Chat OFF</button></div><div class="row"><button onclick="setAI('group',true)">Group ON</button><button class="secondary" onclick="setAI('group',false)">Group OFF</button><button onclick="setAI('inbox',true)">Inbox ON</button><button class="secondary" onclick="setAI('inbox',false)">Inbox OFF</button></div><div class="row"><button onclick="setAI('memory',true)">Memory ON</button><button class="secondary" onclick="setAI('memory',false)">Memory OFF</button></div><p class="small muted" id="aiMsg"></p></section>
+<section class="card"><h2>Learning Control</h2><p class="muted">Consent-based learning. Users must opt in themselves before their ordinary messages are retained.</p><div id="learningStatus">Loading…</div><div class="row"><button onclick="setLearning(true)">Learning ON</button><button class="danger" onclick="setLearning(false)">Learning OFF</button></div><p id="learningMsg" class="small muted"></p></section>
 <section class="card"><h2>Plugin Manager</h2><p class="muted">Plugin state is stored in MongoDB and restored after restart.</p><div id="plugins">Loading…</div></section>
 <section class="card"><h2>System</h2><div id="system" class="muted">Loading…</div></section>
 <section class="card"><h2>Recent Logs</h2><div id="logs">Loading…</div></section>
@@ -88,9 +90,14 @@ async function refreshAll(){
   document.getElementById('identity').textContent=d.identity ? ('Name: '+(d.identity.name||'Not provided')+' · Number/ID: '+(d.identity.id||'Not available')) : 'Account details are not available until connected.';
   document.getElementById('system').textContent='Node '+d.node+' · Memory '+d.state.memoryMB+' MB · Host '+d.hostname;
   document.getElementById('plugins').innerHTML=d.plugins.map(p=>'<div class="row" style="align-items:center;justify-content:space-between;margin:8px 0"><span>'+p.name+'</span><button onclick="togglePlugin(&quot;'+p.key+'&quot;,'+(!p.enabled)+')">'+(p.enabled?'Disable':'Enable')+'</button></div>').join('')||'No plugins loaded';
+  refreshAI(); refreshLearning();
   document.getElementById('logs').innerHTML=d.logs.map(l=>'<div class="log">['+l.time+'] ['+l.level.toUpperCase()+'] '+l.message.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</div>').join('')||'No logs';
  }catch(e){document.getElementById('details').textContent=e.message}
 }
+async function refreshAI(){try{const d=await api('/api/ai/settings');document.getElementById('aiSettings').textContent='Auto Chat: '+(d.settings.autoChat?'ON':'OFF')+' · Group: '+(d.settings.group?'ON':'OFF')+' · Inbox: '+(d.settings.inbox?'ON':'OFF')+' · Memory: '+(d.settings.memory?'ON':'OFF')}catch(e){document.getElementById('aiSettings').textContent=e.message}}
+async function setAI(key,enabled){const box=document.getElementById('aiMsg');box.textContent='Saving…';try{await api('/api/ai/settings',{method:'POST',body:JSON.stringify({key,enabled})});box.textContent='Saved to MongoDB';refreshAI()}catch(e){box.textContent=e.message}}
+async function refreshLearning(){try{const d=await api('/api/learning/settings');document.getElementById('learningStatus').textContent='Global learning: '+(d.enabled?'ON':'OFF')+' · Stored entries: '+d.entries+' · Opt-in users: '+d.optedIn}catch(e){document.getElementById('learningStatus').textContent=e.message}}
+async function setLearning(enabled){const box=document.getElementById('learningMsg');box.textContent='Saving…';try{await api('/api/learning/settings',{method:'POST',body:JSON.stringify({enabled})});box.textContent='Saved to MongoDB';refreshLearning()}catch(e){box.textContent=e.message}}
 async function refreshQR(){
  try{const d=await api('/api/qr');const img=document.getElementById('qr');
  if(d.dataUrl){img.src=d.dataUrl;img.style.display='block';document.getElementById('qrMsg').textContent='Scan this QR from WhatsApp Linked Devices.'}
@@ -116,6 +123,54 @@ refreshAll();refreshQR();setInterval(refreshAll,5000);setInterval(refreshQR,7000
       key, name: plugin.name || key, enabled: config.plugins[key] !== false
     }));
     res.json({ state: getBotState(), identity: getBotIdentity?.() || null, plugins, logs: getLogs().slice(0, 50), node: process.version, hostname: os.hostname() });
+  });
+
+  app.get("/api/ai/settings", async (_req, res) => {
+    try {
+      const collection = getMongoSettingsCollection?.();
+      if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
+      const doc = await collection.findOne({ _id: "ai" });
+      res.json({ settings: { autoChat: false, group: false, inbox: true, memory: true, ...(doc?.values || {}) } });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.post("/api/ai/settings", async (req, res) => {
+    try {
+      const { key, enabled } = req.body || {};
+      if (!["autoChat", "group", "inbox", "memory"].includes(key) || typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "Invalid AI setting" });
+      }
+      const collection = getMongoSettingsCollection?.();
+      if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
+      const doc = await collection.findOne({ _id: "ai" });
+      const values = { autoChat: false, group: false, inbox: true, memory: true, ...(doc?.values || {}), [key]: enabled };
+      await collection.updateOne({ _id: "ai" }, { $set: { values, updatedAt: new Date() } }, { upsert: true });
+      addLog("success", `Dashboard AI setting changed: ${key}=${enabled}`);
+      res.json({ ok: true, settings: values });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.get("/api/learning/settings", async (_req, res) => {
+    try {
+      const collection = getMongoSettingsCollection?.();
+      if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
+      const doc = await collection.findOne({ _id: "learning" });
+      const db = getMongoDb?.();
+      const entries = db ? await db.collection("learning_entries").countDocuments({}) : 0;
+      const optedIn = db ? await db.collection("learning_consent").countDocuments({ enabled: true }) : 0;
+      res.json({ enabled: doc?.enabled === true, entries, optedIn });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.post("/api/learning/settings", async (req, res) => {
+    try {
+      if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled must be a boolean" });
+      const collection = getMongoSettingsCollection?.();
+      if (!collection) return res.status(503).json({ error: "MongoDB settings are not connected" });
+      await collection.updateOne({ _id: "learning" }, { $set: { enabled: req.body.enabled, updatedAt: new Date() } }, { upsert: true });
+      addLog("success", `Dashboard learning feature ${req.body.enabled ? "enabled" : "disabled"}`);
+      res.json({ ok: true, enabled: req.body.enabled });
+    } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   app.get("/api/qr", async (_req, res) => {
