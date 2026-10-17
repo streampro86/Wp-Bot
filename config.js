@@ -49,7 +49,9 @@ export default {
     status: true,
     ai: true,
     font: true,
-    learn: true
+    learn: true,
+    help: true,
+    owner: true
   },
 
   // AI settings — primary endpoint

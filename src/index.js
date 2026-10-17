@@ -200,15 +200,38 @@ async function handleIncomingMessage(message) {
     }
   }
   const senderNumber = senderJid.split("@")[0].split(":")[0].replace(/\D/g, "");
-  // Multi-owner support
+  // Multi-owner support (robust matching)
   const ownerList = new Set();
-  const primary = String(config.ownerJid || "").replace(/\D/g, "");
+  const primary = String(config.ownerJid || process.env.OWNER_NUMBER || "").replace(/\D/g, "");
   if (primary) ownerList.add(primary);
   for (const n of (config.owners || [])) {
     const clean = String(n || "").replace(/\D/g, "");
     if (clean) ownerList.add(clean);
   }
-  const isOwner = ownerList.has(senderNumber);
+  // Also accept numbers from OWNER_NUMBERS env at runtime (in case config was cached)
+  for (const n of String(process.env.OWNER_NUMBERS || "").split(",")) {
+    const clean = n.replace(/\D/g, "");
+    if (clean) ownerList.add(clean);
+  }
+
+  function numberMatchesOwner(num) {
+    if (!num) return false;
+    if (ownerList.has(num)) return true;
+    // Match last 10 digits (handles 8801... vs 01... vs missing country code)
+    const tail = num.slice(-10);
+    for (const own of ownerList) {
+      if (own.slice(-10) === tail) return true;
+      if (own === num || num.endsWith(own) || own.endsWith(num)) return true;
+    }
+    return false;
+  }
+
+  const isOwner = numberMatchesOwner(senderNumber);
+  // Also treat the linked account itself as owner when selfListen is on
+  const botOwnNumber = String(sock?.user?.id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
+  const isLinkedAccount = Boolean(botOwnNumber && (botOwnNumber === senderNumber || numberMatchesOwner(botOwnNumber) && message?.key?.fromMe));
+  const finalIsOwner = isOwner || (config.selfListen && message?.key?.fromMe && numberMatchesOwner(botOwnNumber || senderNumber));
+
   const context = {
     sock,
     message,
@@ -221,8 +244,10 @@ async function handleIncomingMessage(message) {
     addLog,
     mongoSettingsCollection,
     mongoDb,
-    isOwner,
-    isAdmin: Boolean(isOwner || isGroupAdmin)
+    isOwner: finalIsOwner,
+    isAdmin: Boolean(finalIsOwner || isGroupAdmin),
+    senderNumber,
+    ownerList: [...ownerList]
   };
 
   let commandHandled = false;
@@ -393,14 +418,18 @@ export async function dashboardDeleteSession() {
 
 export async function requestPairingCode(phoneNumber) {
   const clean = String(phoneNumber || "").replace(/\D/g, "");
-  if (clean.length < 8 || clean.length > 15) {
-    throw new Error("Enter an international number with country code, digits only (Bangladesh example: 8801XXXXXXXXX).");
+  if (clean.length < 10 || clean.length > 15) {
+    throw new Error("Enter full international number with country code, digits only. Bangladesh example: 8801XXXXXXXXX (no + or 0 at start).");
   }
-  if (getBotState().connected) throw new Error("WhatsApp is already connected.");
-  if (!sock) throw new Error("WhatsApp client is starting. Wait 10 seconds and try again.");
-  if (pairingRequestInProgress) throw new Error("Pairing code request is already running. Wait a few seconds.");
+  // Common mistake: starting with 01 instead of 8801
+  if (clean.startsWith("01") && clean.length === 11) {
+    throw new Error("Number looks local (01...). Use country code: 8801XXXXXXXXX");
+  }
+  if (getBotState().connected) throw new Error("WhatsApp is already connected. Logout first if you want to link a different account.");
+  if (!sock) throw new Error("WhatsApp client is still starting. Wait 10–15 seconds, refresh dashboard, then try again.");
+  if (pairingRequestInProgress) throw new Error("A pairing request is already running. Wait 20 seconds before trying again.");
   if (authStateRef?.creds?.registered) {
-    throw new Error("This session is already linked to a WhatsApp account. Use the existing session, or clear the session folder only if you want to link a different account.");
+    throw new Error("This session is already linked. Use "Delete saved session" first if you want to link a different number.");
   }
 
   pairingRequestInProgress = true;
@@ -408,25 +437,55 @@ export async function requestPairingCode(phoneNumber) {
   qrData = null;
   pairingCode = null;
   setBotState({ connection: "waiting_for_pairing", connected: false });
-  addLog("info", "Pairing-code request started");
+  addLog("info", `Pairing-code request started for ${clean.slice(0, 4)}****${clean.slice(-3)}`);
+
   try {
-    // Baileys docs recommend requesting the code only after the socket begins connecting.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    if (!sock || getBotState().connected) throw new Error("WhatsApp socket state changed. Refresh dashboard and retry.");
-    if (authStateRef?.creds?.registered) {
-      throw new Error("Session became registered while waiting. Refresh the dashboard.");
+    // Wait until socket is ready enough (Baileys needs an open-ish connection state)
+    let attempts = 0;
+    while (attempts < 12) {
+      if (!sock) throw new Error("Socket disappeared. Refresh and retry.");
+      if (getBotState().connected) throw new Error("Already connected.");
+      if (authStateRef?.creds?.registered) throw new Error("Session registered while waiting.");
+      // Give Baileys time to finish initial handshake
+      await new Promise((r) => setTimeout(r, 800));
+      attempts += 1;
+      // After a few waits, try requesting
+      if (attempts >= 3) break;
     }
-    const code = await sock.requestPairingCode(clean);
-    pairingCode = code;
+
+    if (!sock.requestPairingCode) {
+      throw new Error("This Baileys build does not support pairing codes. Use QR login instead.");
+    }
+
+    const rawCode = await sock.requestPairingCode(clean);
+    // Normalize display: ABCDEFGH -> ABCD-EFGH
+    const digits = String(rawCode || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    const formatted = digits.length === 8
+      ? `${digits.slice(0, 4)}-${digits.slice(4)}`
+      : digits || rawCode;
+
+    pairingCode = formatted;
     qrData = null;
-    addLog("success", "Pairing code generated successfully. Enter it immediately in WhatsApp.");
-    return code;
+    addLog("success", `Pairing code ready: ${formatted}. Enter it NOW in WhatsApp (code expires quickly).`);
+    // Auto-clear flag after a while so user can retry
+    setTimeout(() => {
+      if (pairingRequestInProgress && !getBotState().connected) {
+        pairingRequestInProgress = false;
+      }
+    }, 90000);
+    return formatted;
   } catch (error) {
     pairingRequestInProgress = false;
     loginMode = "qr";
+    pairingCode = null;
     setBotState({ connection: "waiting_for_qr", connected: false });
-    addLog("error", `Pairing code generation failed: ${error?.message || error}`);
-    throw new Error(`Could not generate pairing code: ${error?.message || error}`);
+    const msg = error?.message || String(error);
+    addLog("error", `Pairing failed: ${msg}`);
+    // Friendlier hints for common WhatsApp rejections
+    if (/rate|too many|try again/i.test(msg)) {
+      throw new Error("WhatsApp rate-limited pairing. Wait 2–3 minutes, then try QR login instead.");
+    }
+    throw new Error(`Pairing failed: ${msg}. Tip: delete saved session, wait 30s, then use QR login (more reliable).`);
   }
 }
 

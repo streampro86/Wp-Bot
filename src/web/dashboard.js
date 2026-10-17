@@ -68,9 +68,14 @@ a{color:#9ec5ff}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sma
 <section class="card warning"><h2>🔐 Session Controls</h2><p class="muted">Use these controls when the saved WhatsApp session is invalid or you want to link a different account.</p><div class="row"><button class="danger" onclick="logoutWhatsApp()">Log out WhatsApp</button><button class="secondary" onclick="deleteSession()">Delete saved session</button></div><p class="small muted" id="sessionMsg">Logout attempts to unlink the WhatsApp session. Delete session clears saved credentials and asks for a new QR/pairing login.</p></section>
 <section class="card"><h2>📱 QR Login</h2><p class="muted">Open WhatsApp → Linked Devices → Link a Device, then scan.</p>
 <img id="qr" alt="WhatsApp login QR"><p id="qrMsg" class="muted">Waiting for QR…</p><button onclick="refreshQR()">Refresh QR</button></section>
-<section class="card"><h2>🔢 Pairing Code Login</h2><form id="pairForm"><label for="phone">Phone number with country code (digits only)</label>
-<input id="phone" placeholder="8801XXXXXXXXX" autocomplete="off" required minlength="8" maxlength="15">
-<button type="submit">Generate Pairing Code</button></form><pre id="pairCode">No pairing code requested</pre><p class="small muted" id="pairMsg"></p></section>
+<section class="card"><h2>🔢 Pairing Code Login</h2>
+<p class="muted">Use the <b>same number</b> that is logged in on your phone. Bangladesh example: <code>8801XXXXXXXXX</code> (no + or leading 0).</p>
+<p class="small muted">If pairing fails with "Couldn't link device", delete saved session, wait 30 seconds, then use <b>QR Login</b> instead (more reliable).</p>
+<form id="pairForm"><label for="phone">Phone number (country code + number, digits only)</label>
+<input id="phone" placeholder="8801XXXXXXXXX" autocomplete="off" required minlength="10" maxlength="15">
+<button type="submit">Generate Pairing Code</button></form>
+<pre id="pairCode">No pairing code requested</pre>
+<p class="small muted" id="pairMsg"></p></section>
 <section class="card"><h2>🤖 AI Control Center</h2><p class="muted">Persistent AI settings stored in MongoDB.</p><div id="aiSettings">Loading…</div><div class="row"><button onclick="setAI('autoChat',true)">Auto Chat ON</button><button class="secondary" onclick="setAI('autoChat',false)">Auto Chat OFF</button></div><div class="row"><button onclick="setAI('group',true)">Group ON</button><button class="secondary" onclick="setAI('group',false)">Group OFF</button><button onclick="setAI('inbox',true)">Inbox ON</button><button class="secondary" onclick="setAI('inbox',false)">Inbox OFF</button></div><div class="row"><button onclick="setAI('memory',true)">Memory ON</button><button class="secondary" onclick="setAI('memory',false)">Memory OFF</button></div><p class="small muted" id="aiMsg"></p></section>
 <section class="card"><h2>🧠 Learning Control</h2><p class="muted">Consent-based learning. Users must opt in themselves before their ordinary messages are retained.</p><div id="learningStatus">Loading…</div><div class="row"><button onclick="setLearning(true)">Learning ON</button><button class="danger" onclick="setLearning(false)">Learning OFF</button></div><p id="learningMsg" class="small muted"></p></section>
 <section class="card"><h2>🧩 Plugin Manager</h2><p class="muted">Plugin state is stored in MongoDB and restored after restart.</p><div id="plugins">Loading…</div></section>
