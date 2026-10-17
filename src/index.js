@@ -32,6 +32,7 @@ let mongoClient = null;
 let mongoAuthCollection = null;
 let mongoSettingsCollection = null;
 const pluginModules = new Map();
+let mongoDb = null;
 
 
 // MongoDB-backed Baileys auth storage works on Render Free without a persistent disk.
@@ -49,6 +50,7 @@ async function useMongoAuthState() {
     await mongoClient.connect();
   }
   const db = mongoClient.db(config.mongoDbName || "mahadi_whatsapp_bot");
+  mongoDb = db;
   mongoAuthCollection = db.collection(config.mongoAuthCollection || "baileys_auth");
   mongoSettingsCollection = db.collection("bot_settings");
   const savedPluginSettings = await mongoSettingsCollection.findOne({ _id: "plugins" });
@@ -127,7 +129,7 @@ async function loadPlugins() {
         addLog("warn", `Skipped ${file}: default export with execute() is required`);
         continue;
       }
-      pluginModules.set(file.replace(/\.js$/, ""), imported.default);
+      pluginModules.set(file.replace(/\.js$/, ""), { ...imported.default, handleAutoAI: imported.handleAutoAI });
       addLog("info", `Loaded plugin: ${imported.default.name || file}`);
     } catch (error) {
       addLog("error", `Plugin load failed (${file}): ${error.message}`);
@@ -163,7 +165,10 @@ async function handleIncomingMessage(message) {
   } else {
     return;
   }
-  if (!commandLine) return;
+  if (!commandLine) {
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, message, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    return;
+  }
   const [command, ...args] = commandLine.split(/\s+/);
   if (!command) return;
   const context = {
@@ -175,14 +180,19 @@ async function handleIncomingMessage(message) {
     command: command.toLowerCase(),
     args,
     config,
-    addLog
+    addLog,
+    mongoSettingsCollection,
+    isOwner: Boolean(config.ownerJid && String(message.key.participant || message.key.remoteJid).split("@")[0] === String(config.ownerJid).replace(/\D/g, "")),
+    isAdmin: Boolean(config.ownerJid && String(message.key.participant || message.key.remoteJid).split("@")[0] === String(config.ownerJid).replace(/\D/g, ""))
   };
 
+  let commandHandled = false;
   for (const [key, plugin] of pluginModules.entries()) {
     if (config.plugins[key] === false) continue;
     try {
       const commands = (plugin.commands || []).map((c) => String(c).toLowerCase());
       if (commands.includes(context.command)) {
+        commandHandled = true;
         await plugin.execute(context);
         return;
       }
@@ -192,6 +202,7 @@ async function handleIncomingMessage(message) {
       return;
     }
   }
+  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, message, commandHandled }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
 }
 
 async function startWhatsApp() {

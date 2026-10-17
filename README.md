@@ -9,7 +9,7 @@ Starter project using Node.js, Baileys, a protected web dashboard, QR/pairing lo
 - Plugin manager toggle
 - `!ping`, `!status`, `!alive` in group chats
 - Public `/health` JSON endpoint for UptimeRobot
-- Settings in `config.js`; no `.env` file required
+- MongoDB URI and dashboard password supplied through Render environment variables; no `.env` file required
 
 ## Before deploying
 1. Edit `config.js`.
@@ -23,7 +23,7 @@ Starter project using Node.js, Baileys, a protected web dashboard, QR/pairing lo
 - Build command: `npm install`
 - Start command: `npm start`
 - Node version: 20 or newer.
-- This project uses MongoDB Atlas for persistent WhatsApp credentials, so a Render Persistent Disk is not required. In `config.js`, keep `authStorage: "mongodb"` and replace `mongoUri` with your own Atlas connection URI before deploying. The bot cannot persist login until a valid MongoDB URI is configured.
+- This project uses MongoDB Atlas for persistent WhatsApp credentials, so a Render Persistent Disk is not required. In `config.js`, keep `authStorage: "mongodb"` and add `MONGODB_URI` as a Render environment variable with your own Atlas connection URI before deploying, and set `DASHBOARD_PASSWORD`. The bot cannot persist login until a valid MongoDB URI is configured.
 - Do not deploy multiple instances against the same WhatsApp session.
 
 ## UptimeRobot
@@ -83,3 +83,13 @@ With no-prefix enabled, send `ping`, `status`, or `alive`. With prefix enabled, 
 - Set a real MongoDB Atlas URI in `config.js` before deploying. The placeholder URI is not usable.
 - Change the dashboard password in `config.js` before making the dashboard accessible. Do not publish credentials in a public repository.
 - `/health` is intended for uptime monitoring. The dashboard is protected by HTTP Basic Authentication; use HTTPS and a strong password.
+
+
+## AI and font commands
+- `!ai <message>` — send a prompt to the configured AI API.
+- `!ai on/off/status` — control and inspect Auto Chat. Auto Chat defaults to OFF.
+- `!ai group on/off` and `!ai inbox on/off` — configure Auto Chat destinations.
+- `!font fancy Your text`, `!font bold Your text`, `!font mono Your text` — convert text.
+- `!font normal/fancy/bold/mono` — save the preferred font style in MongoDB.
+
+Render environment variables: `MONGODB_URI` (required for persistence) and `DASHBOARD_PASSWORD` (set a strong unique password). The MongoDB URI is read from the environment, never from plugin files.

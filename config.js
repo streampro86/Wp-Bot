@@ -1,4 +1,4 @@
-// Mahadi Hasan WhatsApp Bot — all settings live here; no .env required.
+// Mahadi Hasan WhatsApp Bot — secrets are supplied through Render environment variables.
 export default {
   botName: "Mahadi Hasan",
   author: "Mahadi Hasan",
@@ -10,12 +10,13 @@ export default {
   selfListen: true,
   // true = only groups; false = groups and private chats.
   groupOnly: false,
-  port: 10000,
+  port: Number(process.env.PORT || 10000),
+  ownerJid: process.env.OWNER_NUMBER || "",
 
   // Dashboard login. Change this password before sharing your repository.
   dashboard: {
     username: "admin",
-    password: "Mahadi@2026#Admin"
+    password: process.env.DASHBOARD_PASSWORD || "CHANGE-THIS-STRONG-PASSWORD"
   },
 
   // Optional: international digits only, e.g. Bangladesh 8801XXXXXXXXX.
@@ -25,7 +26,7 @@ export default {
   authStorage: "mongodb", // "mongodb" persists login; "local" is not persistent on Render Free
   // Example format: mongodb+srv://DB_USER:DB_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
   // Replace this placeholder with your own private Atlas URI before deploying.
-  mongoUri: "PASTE_MONGODB_ATLAS_URI_HERE",
+  mongoUri: process.env.MONGODB_URI || "",
   mongoDbName: "mahadi_whatsapp_bot",
   mongoAuthCollection: "baileys_auth",
   // Used only when authStorage is "local" or MongoDB is intentionally disabled.
@@ -34,6 +35,9 @@ export default {
 
   plugins: {
     ping: true,
-    status: true
-  }
+    status: true,
+    ai: true,
+    font: true
+  },
+  ai: { endpoint: "https://hasan-indol.vercel.app/api/chat", provider: "auto", timeoutMs: 20000 }
 };
