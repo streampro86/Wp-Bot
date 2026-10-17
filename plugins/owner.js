@@ -20,9 +20,9 @@ export default {
       `Configured owners:`,
       list,
       ``,
-      `ℹ️ Set real number in Render/host environment:`,
-      `OWNER_NUMBER=8801XXXXXXXXX`,
-      `(digits only, country code included, no +)`
+      isOwner
+        ? "✅ Tomar owner access ache."
+        : "🔒 Access nai — ei number owner list e nai.\nOWNER_NUMBER env e nijer number set koro."
     ].join("\n");
 
     await sock.sendMessage(remoteJid, { text }, { quoted: message });
