@@ -178,11 +178,11 @@ async function handleIncomingMessage(message) {
   } else if (config.noPrefixEnabled === true) {
     commandLine = body;
   } else {
-    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   if (!commandLine) {
-    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   const [command, ...args] = commandLine.split(/\s+/);
@@ -266,7 +266,7 @@ async function handleIncomingMessage(message) {
       return;
     }
   }
-  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
 }
 
 async function startWhatsApp() {

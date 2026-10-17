@@ -54,23 +54,82 @@ const MAHADI_SYSTEM = `
 - Hate, discrimination, serious threat বা genuine harassment কোরো না।
 `.trim();
 
-async function askAI(prompt, config) {
-  const endpoint = new URL(config.ai.endpoint);
-  endpoint.searchParams.set("message", prompt);
-  endpoint.searchParams.set("provider", config.ai.provider || "auto");
+function extractAnswer(data) {
+  if (!data || typeof data !== "object") return null;
+  const candidates = [
+    data.text,
+    data.reply,
+    data.response,
+    data.message,
+    data.result,
+    data.answer,
+    data.output,
+    data.content,
+    data.data?.text,
+    data.data?.reply,
+    data.data?.response,
+    data.data?.message,
+    data.choices?.[0]?.message?.content,
+    data.choices?.[0]?.text
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
+async function askAI(prompt, config, addLog) {
+  const base = config?.ai?.endpoint || "https://hasan-indol.vercel.app/api/chat";
+  const endpoint = new URL(base);
+  // Keep prompt reasonably sized for query string APIs
+  const shortPrompt = String(prompt).slice(0, 3500);
+  endpoint.searchParams.set("message", shortPrompt);
+  endpoint.searchParams.set("provider", config?.ai?.provider || "auto");
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.ai.timeoutMs || 25000);
+  const timeoutMs = config?.ai?.timeoutMs || 25000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  addLog?.("info", `AI request → ${endpoint.origin}${endpoint.pathname}`);
+
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(endpoint.toString(), {
       signal: controller.signal,
-      headers: { accept: "application/json" }
+      headers: {
+        accept: "application/json",
+        "user-agent": "MahadiHasanBot/2.2"
+      }
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`AI API returned HTTP ${response.status}`);
-    const answer = data.reply || data.response || data.message || data.result
-      || data.data?.reply || data.data?.response || data.choices?.[0]?.message?.content;
-    if (typeof answer !== "string" || !answer.trim()) throw new Error("AI API response did not contain a reply");
-    return answer.trim().slice(0, 5000);
+
+    const rawText = await response.text();
+    let data = {};
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { text: rawText };
+    }
+
+    if (!response.ok) {
+      const errDetail = (data.error || data.message || rawText || "").toString().slice(0, 200);
+      addLog?.("error", `AI API HTTP ${response.status}: ${errDetail}`);
+      throw new Error(`AI API HTTP ${response.status}: ${errDetail || "no body"}`);
+    }
+
+    const answer = extractAnswer(data);
+    if (!answer) {
+      addLog?.("error", `AI API ok but no reply field. Keys: ${Object.keys(data).join(",")}`);
+      throw new Error("AI API response did not contain a reply (expected text/reply/message)");
+    }
+
+    addLog?.("success", `AI reply ok (${answer.length} chars)`);
+    return answer.slice(0, 5000);
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      addLog?.("error", `AI request timed out after ${timeoutMs}ms`);
+      throw new Error(`AI timeout after ${timeoutMs}ms`);
+    }
+    addLog?.("error", `AI request failed: ${err.message}`);
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -86,12 +145,11 @@ async function getConversationContext(mongoDb, chatId, senderId) {
   return rows.reverse();
 }
 
-async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memoryEnabled }) {
+async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memoryEnabled, addLog }) {
   let requestPrompt = `${MAHADI_SYSTEM}\n\nUser message: ${prompt}`;
-  let history = [];
 
   if (memoryEnabled && mongoDb && chatId && senderId) {
-    history = await getConversationContext(mongoDb, chatId, senderId);
+    const history = await getConversationContext(mongoDb, chatId, senderId);
     if (history.length) {
       const transcript = history
         .map((item) => `${item.role === "assistant" ? "Mahadi Hasan" : "User"}: ${item.text}`)
@@ -100,31 +158,34 @@ async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memo
     }
   }
 
-  const answer = await askAI(requestPrompt, config);
+  const answer = await askAI(requestPrompt, config, addLog);
 
-  // Clean any accidental old names just in case
   const cleaned = answer
     .replace(/\b(Hasu Bot|HASU BOT|Hasu|Ritu|Sadiya|Dev X Ritu)\b/gi, "Mahadi Hasan")
     .trim();
 
   if (memoryEnabled && mongoDb && chatId && senderId) {
-    const collection = mongoDb.collection("ai_memory");
-    await collection.insertMany([
-      { chatId, senderId, role: "user", text: prompt.slice(0, 2000), createdAt: new Date() },
-      { chatId, senderId, role: "assistant", text: cleaned.slice(0, 4000), createdAt: new Date() }
-    ]);
-    const count = await collection.countDocuments({ chatId, senderId });
-    if (count > MEMORY_LIMIT * 2) {
-      const old = await collection.find({ chatId, senderId }).sort({ createdAt: 1 }).limit(count - MEMORY_LIMIT * 2).project({ _id: 1 }).toArray();
-      if (old.length) await collection.deleteMany({ _id: { $in: old.map((item) => item._id) } });
+    try {
+      const collection = mongoDb.collection("ai_memory");
+      await collection.insertMany([
+        { chatId, senderId, role: "user", text: prompt.slice(0, 2000), createdAt: new Date() },
+        { chatId, senderId, role: "assistant", text: cleaned.slice(0, 4000), createdAt: new Date() }
+      ]);
+      const count = await collection.countDocuments({ chatId, senderId });
+      if (count > MEMORY_LIMIT * 2) {
+        const old = await collection.find({ chatId, senderId }).sort({ createdAt: 1 }).limit(count - MEMORY_LIMIT * 2).project({ _id: 1 }).toArray();
+        if (old.length) await collection.deleteMany({ _id: { $in: old.map((item) => item._id) } });
+      }
+    } catch (e) {
+      addLog?.("warn", `AI memory save failed: ${e.message}`);
     }
   }
   return cleaned;
 }
 
 export async function handleAutoAI(context) {
-  const { body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender, commandHandled } = context;
-  if (commandHandled || message?.key?.fromMe || !body || /^(?:!|ai\s|font\s|learn\b|ping\b|status\b|alive\b)/i.test(body)) return false;
+  const { body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender, commandHandled, addLog } = context;
+  if (commandHandled || message?.key?.fromMe || !body || /^(?:!|ai\s|font\s|learn\b|ping\b|status\b|alive\b|help\b|menu\b|owner\b)/i.test(body)) return false;
   const settings = await readAISettings(mongoSettingsCollection);
   if (!settings.autoChat) return false;
   if (remoteJid.endsWith("@g.us") && !settings.group) return false;
@@ -137,11 +198,13 @@ export async function handleAutoAI(context) {
       mongoDb,
       chatId: remoteJid,
       senderId: senderNumber(sender || message?.key?.participant || remoteJid),
-      memoryEnabled: settings.memory
+      memoryEnabled: settings.memory,
+      addLog
     });
     await sock.sendMessage(remoteJid, { text: answer }, { quoted: message });
     return true;
   } catch (err) {
+    addLog?.("error", `Auto AI failed: ${err.message}`);
     return false;
   }
 }
@@ -155,7 +218,7 @@ export default {
   description: "Mahadi Hasan AI — natural Bangla/Banglish chat with memory and auto-reply",
   usage: "!ai <message> | !ai on/off/status | !ai group on/off | !ai inbox on/off | !ai memory on/off | !ai forget",
   async execute(ctx) {
-    const { sock, remoteJid, args, config, mongoSettingsCollection, mongoDb, message, sender } = ctx;
+    const { sock, remoteJid, args, config, mongoSettingsCollection, mongoDb, message, sender, addLog } = ctx;
     const action = (args[0] || "").toLowerCase();
     const settings = await readAISettings(mongoSettingsCollection);
     const needsOwner = ["on", "off", "status", "group", "inbox", "memory", "forget"].includes(action);
@@ -174,7 +237,8 @@ export default {
           `Auto Chat: ${settings.autoChat ? "ON ✅" : "OFF"}`,
           `Group: ${settings.group ? "ON ✅" : "OFF"}`,
           `Inbox: ${settings.inbox ? "ON ✅" : "OFF"}`,
-          `Conversation Memory: ${settings.memory ? "ON ✅" : "OFF"}`
+          `Conversation Memory: ${settings.memory ? "ON ✅" : "OFF"}`,
+          `Endpoint: ${config?.ai?.endpoint || "default"}`
         ].join("\n")
       }, { quoted: message });
       return;
@@ -234,18 +298,21 @@ export default {
     }
 
     try {
+      await sock.sendMessage(remoteJid, { text: "⏳ Thinking..." }, { quoted: message });
       const answer = await replyWithMemory({
         prompt,
         config,
         mongoDb,
         chatId: remoteJid,
         senderId: senderNumber(sender || remoteJid),
-        memoryEnabled: settings.memory
+        memoryEnabled: settings.memory,
+        addLog
       });
       await sock.sendMessage(remoteJid, { text: answer }, { quoted: message });
     } catch (err) {
+      addLog?.("error", `!ai failed: ${err.message}`);
       await sock.sendMessage(remoteJid, {
-        text: "⚠️ AI reply আসতে সমস্যা হয়েছে। একটু পরে আবার চেষ্টা করো।"
+        text: `⚠️ AI fail: ${err.message}\n\nRender logs e detail dekhte parbe.`
       }, { quoted: message });
     }
   }
