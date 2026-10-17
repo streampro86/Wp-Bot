@@ -26,24 +26,23 @@ export async function saveAISettings(collection, values) {
 }
 
 const MAHADI_SYSTEM = `
-তুমি Mahadi Hasan — একজন ভদ্র, সম্মানী বাংলাদেশি মানুষ।
+তুমি Mahadi Hasan। ভদ্র বাংলাদেশি মানুষ। সবসময় "আপনি" বলো।
 
-সম্মান ও ভাষা (বাধ্যতামূলক):
-- সবসময় "আপনি / আপনার / আপনাকে" ব্যবহার করো। কখনো "তুমি/তোর/তোকে" বলো না।
-- প্রয়োজনমতো সালাম: আসসালামু আলাইকুম / ওয়ালাইকুম সালাম।
-- খোঁজখবর: কেমন আছেন, কী খবর — একই লাইন বারবার repeat কোরো না।
-- ভদ্র, নম্র, বন্ধুসুলভ। Robot বা customer-care ভাষা নয়।
+সবচেয়ে গুরুত্বপূর্ণ নিয়ম:
+1) User-এর সর্বশেষ message-এর সরাসরি উত্তর দাও। অন্য কিছু নিয়ে ঘোরাঘুরি কোরো না।
+2) একই উত্তর কখনো দুইবার দিও না। "ওয়ালাইকুম সালাম / আপনি কেমন আছেন" বারবার বলা সম্পূর্ণ নিষেধ।
+3) আগের কথোপকথন থাকলে সেখান থেকে এগোও — আবার salam বা "কেমন আছেন" জিজ্ঞেস কোরো না যদি আগে বলে থাকো।
+4) ছোট reply (১ বাক্য বা ২ ছোট লাইন)। Robot ভাষা নয়।
 
-কথা বলার নিয়ম:
-- WhatsApp এ আসল মানুষের মতো ছোট উত্তর (সাধারণত ১–২ লাইন)।
-- User যা বলে তার ওপর ভিত্তি করে উত্তর দাও। একই প্রশ্ন দুইবার জিজ্ঞেস কোরো না।
-- নামের আগে "Mahadi Hasan:" লিখবে না — সরাসরি কথা বলো।
-- User যে ভাষায় লিখে সেই ভাষায় উত্তর দাও।
-- Emoji কম (০–১টা)।
-- AI/bot বলে পরিচয় দিও না, যতক্ষণ সরাসরি না জিজ্ঞেস করে।
+সালাম নিয়ম:
+- User সালাম দিলে শুধু: "ওয়ালাইকুম সালাম" + ছোট follow-up (প্রয়োজন হলে)।
+- User শুধু "Hi/Hello/হ্যালো" বললে সংক্ষেপে greeting — প্রতিবার একই sentence নয়।
+- User অন্য কিছু বললে (যেমন "Bal", কোনো প্রশ্ন, মন্তব্য) সালাম দিও না; সরাসরি সেই বিষয়ে উত্তর দাও।
 
-Memory:
-- Recent chat ও saved notes থাকলে context হিসেবে ব্যবহার করো; বানিয়ে বলো না।
+অন্যান্য:
+- নাম প্রিফিক্স ("Mahadi Hasan:") লিখবে না।
+- AI/bot পরিচয় দিও না যতক্ষণ না জিজ্ঞেস করে।
+- Emoji ০–১টা optional।
 `.trim();
 
 function extractAnswer(data) {
@@ -166,8 +165,37 @@ async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memo
     }
   }
 
-  const requestPrompt = `${MAHADI_SYSTEM}${extra}\n\nUser এখন বলছেন: ${prompt}\n\nআপনার উত্তর (সরাসরি, নাম প্রিফিক্স ছাড়া, সবসময় আপনি বলে সম্মানসহ):`;
-  const answer = await askAI(requestPrompt, config, addLog);
+  let ban = "";
+  if (memoryEnabled && mongoDb && chatId && senderId) {
+    try {
+      const last = await mongoDb.collection("ai_memory")
+        .find({ chatId, senderId, role: "assistant" })
+        .sort({ createdAt: -1 })
+        .limit(2)
+        .toArray();
+      if (last.length) {
+        ban = "\n\nতোমার আগের উত্তর (এর মতো বা কাছাকাছি লিখবে না):\n" + last.map((x) => `- ${String(x.text).slice(0, 120)}`).join("\n");
+      }
+    } catch {}
+  }
+
+  const requestPrompt = `${MAHADI_SYSTEM}${extra}${ban}\n\nUser-এর নতুন message: ${prompt}\n\nশুধু এই message-এর relevant উত্তর দাও। আগের উত্তর repeat নিষেধ। নাম প্রিফিক্স ছাড়া, আপনি বলে:`;
+  let answer = await askAI(requestPrompt, config, addLog);
+
+  // If model still repeated last reply, one forced retry
+  if (ban && answer) {
+    const prevLines = ban.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim().toLowerCase());
+    const norm = answer.toLowerCase().replace(/\s+/g, " ").trim();
+    const repeated = prevLines.some((p) => p && (norm.includes(p.slice(0, 40)) || p.includes(norm.slice(0, 40))));
+    if (repeated) {
+      addLog?.("warn", "AI repeated previous reply — retrying once");
+      answer = await askAI(
+        `${MAHADI_SYSTEM}\n\nUser: ${prompt}\n\nআগের উত্তরগুলো ban। একদম নতুন করে, সালাম ছাড়া, শুধু এই message-এর উত্তর (আপনি বলে):`,
+        config,
+        addLog
+      );
+    }
+  }
 
   if (memoryEnabled && mongoDb && chatId && senderId) {
     try {
