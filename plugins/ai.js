@@ -1,7 +1,7 @@
 const MEMORY_LIMIT = 12;
 const DEFAULTS = Object.freeze({
   autoChat: false,
-  group: false,
+  group: true,
   inbox: true,
   memory: true
 });
@@ -184,14 +184,37 @@ async function replyWithMemory({ prompt, config, mongoDb, chatId, senderId, memo
 }
 
 export async function handleAutoAI(context) {
-  const { body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender, commandHandled, addLog } = context;
-  if (commandHandled || message?.key?.fromMe || !body || /^(?:!|ai\s|font\s|learn\b|ping\b|status\b|alive\b|help\b|menu\b|owner\b)/i.test(body)) return false;
+  const { body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender, commandHandled, addLog, applySavedFont } = context;
+  if (commandHandled) {
+    addLog?.("debug", "Auto AI skip: command already handled");
+    return false;
+  }
+  if (message?.key?.fromMe) {
+    addLog?.("debug", "Auto AI skip: own message");
+    return false;
+  }
+  if (!body) return false;
+  if (/^(?:!|ai\s|font\s|learn\b|ping\b|status\b|alive\b|help\b|menu\b|commands\b|owner\b|myid\b)/i.test(body)) {
+    addLog?.("debug", "Auto AI skip: looks like a command");
+    return false;
+  }
+
   const settings = await readAISettings(mongoSettingsCollection);
-  if (!settings.autoChat) return false;
-  if (remoteJid.endsWith("@g.us") && !settings.group) return false;
-  if (remoteJid.endsWith("@s.whatsapp.net") && !settings.inbox) return false;
+  if (!settings.autoChat) {
+    addLog?.("debug", "Auto AI skip: autoChat is OFF (use !ai on)");
+    return false;
+  }
+  if (remoteJid.endsWith("@g.us") && !settings.group) {
+    addLog?.("warn", "Auto AI skip: group replies OFF (use !ai group on)");
+    return false;
+  }
+  if (remoteJid.endsWith("@s.whatsapp.net") && !settings.inbox) {
+    addLog?.("warn", "Auto AI skip: inbox replies OFF (use !ai inbox on)");
+    return false;
+  }
 
   try {
+    addLog?.("info", "Auto AI generating reply…");
     const answer = await replyWithMemory({
       prompt: body,
       config,
@@ -201,7 +224,12 @@ export async function handleAutoAI(context) {
       memoryEnabled: settings.memory,
       addLog
     });
-    await sock.sendMessage(remoteJid, { text: answer }, { quoted: message });
+    let text = answer;
+    if (typeof applySavedFont === "function") {
+      try { text = await applySavedFont(answer, mongoSettingsCollection); } catch {}
+    }
+    await sock.sendMessage(remoteJid, { text }, { quoted: message });
+    addLog?.("send", `Auto AI reply sent (${text.length} chars)`);
     return true;
   } catch (err) {
     addLog?.("error", `Auto AI failed: ${err.message}`);
@@ -308,7 +336,13 @@ export default {
         memoryEnabled: settings.memory,
         addLog
       });
-      await sock.sendMessage(remoteJid, { text: answer }, { quoted: message });
+      let text = answer;
+      try {
+        const { applySavedFont } = await import("../src/utils/font.js");
+        text = await applySavedFont(answer, mongoSettingsCollection);
+      } catch {}
+      await sock.sendMessage(remoteJid, { text }, { quoted: message });
+      addLog?.("send", `AI reply sent (${text.length} chars)`);
     } catch (err) {
       addLog?.("error", `!ai failed: ${err.message}`);
       await sock.sendMessage(remoteJid, {

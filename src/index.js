@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import config from "../config.js";
 import { createDashboard } from "./web/dashboard.js";
 import { addLog, getLogs, setBotState, getBotState } from "./utils/state.js";
+import { applySavedFont } from "./utils/font.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginsDir = path.resolve(__dirname, "../plugins");
@@ -158,6 +159,9 @@ async function handleIncomingMessage(message) {
   const body = safeText(content);
   if (!body) return;
   const senderJid = String(message.key.participant || message.key.remoteJid || "");
+  const fromLabel = senderJid.split("@")[0].split(":")[0];
+  const chatLabel = remoteJid.endsWith("@g.us") ? "group" : "inbox";
+  addLog("receive", `From ${fromLabel} (${chatLabel}): ${body.slice(0, 80)}${body.length > 80 ? "…" : ""}`);
 
   // Interactive plugin handlers run before command parsing (e.g. numbered font/learning menus).
   for (const interactiveName of ["font", "learn"]) {
@@ -178,11 +182,11 @@ async function handleIncomingMessage(message) {
   } else if (config.noPrefixEnabled === true) {
     commandLine = body;
   } else {
-    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog, applySavedFont }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   if (!commandLine) {
-    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+    try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled: false, addLog, applySavedFont }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
     return;
   }
   const [command, ...args] = commandLine.split(/\s+/);
@@ -250,23 +254,58 @@ async function handleIncomingMessage(message) {
     ownerList: [...ownerList]
   };
 
-  let commandHandled = false;
+  // Collect all known commands so no-prefix random chat is not treated as unknown command noise
+  const knownCommands = new Set();
   for (const [key, plugin] of pluginModules.entries()) {
     if (config.plugins[key] === false) continue;
-    try {
-      const commands = (plugin.commands || []).map((c) => String(c).toLowerCase());
-      if (commands.includes(context.command)) {
-        commandHandled = true;
-        await plugin.execute(context);
+    for (const cmd of (plugin.commands || [])) knownCommands.add(String(cmd).toLowerCase());
+    for (const cmd of (plugin.aliases || [])) knownCommands.add(String(cmd).toLowerCase());
+  }
+
+  let commandHandled = false;
+  const isKnownCommand = knownCommands.has(context.command);
+
+  if (isKnownCommand) {
+    for (const [key, plugin] of pluginModules.entries()) {
+      if (config.plugins[key] === false) continue;
+      try {
+        const commands = (plugin.commands || []).map((c) => String(c).toLowerCase());
+        const aliases = (plugin.aliases || []).map((c) => String(c).toLowerCase());
+        if (commands.includes(context.command) || aliases.includes(context.command)) {
+          commandHandled = true;
+          await plugin.execute(context);
+          addLog("send", `Command ${context.command} handled by ${plugin.name || key}`);
+          return;
+        }
+      } catch (error) {
+        addLog("error", `Command !${context.command} failed: ${error.message}`);
+        await sock.sendMessage(remoteJid, { text: `⚠️ Command failed: ${error.message}` });
         return;
       }
-    } catch (error) {
-      addLog("error", `Command !${context.command} failed: ${error.message}`);
-      await sock.sendMessage(remoteJid, { text: "⚠️ Command failed. Admin can check dashboard logs." });
-      return;
     }
   }
-  try { const ai = pluginModules.get("ai"); if (ai?.handleAutoAI) await ai.handleAutoAI({ body, remoteJid, sock, config, mongoSettingsCollection, mongoDb, message, sender: senderJid, commandHandled, addLog }); } catch (error) { addLog("warn", `Auto AI skipped: ${error.message}`); }
+
+  // Auto AI for normal chat (not a known command)
+  try {
+    const ai = pluginModules.get("ai");
+    if (ai?.handleAutoAI) {
+      await ai.handleAutoAI({
+        body,
+        remoteJid,
+        sock,
+        config,
+        mongoSettingsCollection,
+        mongoDb,
+        message,
+        sender: senderJid,
+        commandHandled,
+        addLog,
+        applySavedFont
+      });
+    }
+  } catch (error) {
+    addLog("error", `Auto AI error: ${error.message}`);
+  }
 }
 
 async function startWhatsApp() {

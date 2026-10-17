@@ -6,14 +6,33 @@ let state = {
   startedAt: new Date().toISOString()
 };
 
+const LEVEL_EMOJI = {
+  success: "✅",
+  info: "ℹ️",
+  warn: "⚠️",
+  error: "❌",
+  debug: "🔍",
+  receive: "📥",
+  send: "📤"
+};
+
 export function addLog(level, message) {
-  const entry = { time: new Date().toISOString(), level, message: String(message) };
+  const lvl = String(level || "info").toLowerCase();
+  const emoji = LEVEL_EMOJI[lvl] || "•";
+  const entry = {
+    time: new Date().toISOString(),
+    level: lvl,
+    message: String(message)
+  };
   logs.unshift(entry);
   if (logs.length > 150) logs.length = 150;
-  const prefix = `[${entry.time}] [${level.toUpperCase()}]`;
-  if (level === "error") console.error(prefix, message);
-  else console.log(prefix, message);
+
+  const timeShort = entry.time.slice(11, 19);
+  const line = `[${timeShort}] ${emoji} ${entry.message}`;
+  if (lvl === "error") console.error(line);
+  else console.log(line);
 }
+
 export function getLogs() { return logs; }
 export function setBotState(update) { state = { ...state, ...update }; }
 export function getBotState() {

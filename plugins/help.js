@@ -1,10 +1,12 @@
+import { applySavedFont } from "../src/utils/font.js";
 export default {
   name: "Help",
   commands: ["help", "menu", "commands"],
   category: "System",
   author: "Mahadi Hasan",
   description: "Show all available commands and bot info",
-  async execute({ sock, remoteJid, config, message }) {
+  async execute(ctx) {
+    const { sock, remoteJid, config, message, mongoSettingsCollection } = ctx;
     const prefix = config.prefix || "!";
     const bot = config.botName || "Mahadi Hasan";
 
@@ -44,6 +46,7 @@ export default {
       `╰─── Powered by *Mahadi Hasan* ───╯`
     ].join("\n");
 
-    await sock.sendMessage(remoteJid, { text }, { quoted: message });
+    const styled = await applySavedFont(text, mongoSettingsCollection);
+    await sock.sendMessage(remoteJid, { text: styled }, { quoted: message });
   }
 };
